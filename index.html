@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>股票大亨</title>
+<style>
+  :root{
+    --bg: #0B1929;
+    --panel: #0F2436;
+    --panel-border: #1E3A52;
+    --text: #E8EDF2;
+    --text-dim: #7C93A8;
+    --up: #2ECC71;
+    --down: #E74C3C;
+    --gold: #F0B90B;
+    --dead: #3A4756;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    overflow-x: hidden;
+    user-select: none;
+  }
+  #app { min-height: 100vh; display: flex; flex-direction: column; padding: 2vh 3vw; }
+
+  /* 頂部標題 */
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 2vh;
+    border-bottom: 2px solid var(--panel-border);
+    padding-bottom: 1.5vh;
+  }
+  .title {
+    font-size: clamp(20px, 3.2vw, 32px);
+    font-weight: 800;
+    letter-spacing: 2px;
+  }
+  .title span { color: var(--gold); }
+  .turn-badge {
+    background: var(--panel);
+    border: 2px solid var(--gold);
+    color: var(--gold);
+    padding: 1vh 2vw;
+    border-radius: 10px;
+    font-size: clamp(16px, 2.4vw, 22px);
+    font-weight: 700;
+  }
+
+  /* 玩家列 */
+  .players-row {
+    display: flex; gap: 1.5vw; margin-bottom: 2vh;
+    flex-wrap: wrap;
+  }
+  .player-chip {
+    flex: 1; min-width: 130px;
+    background: var(--panel);
+    border: 2px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 1.2vh 1.5vw;
+    text-align: center;
+    transition: all .2s;
+  }
+  .player-chip.active {
+    border-color: var(--gold);
+    background: #1A2E42;
+    transform: translateY(-3px);
+  }
+  .player-chip .pname { font-size: clamp(13px,1.8vw,16px); color: var(--text-dim); }
+  .player-chip.active .pname { color: var(--gold); }
+  .player-chip .pcash { font-size: clamp(16px,2.4vw,22px); font-weight: 800; margin-top: 0.5vh; }
+  .player-chip .ptotal { font-size: clamp(11px,1.5vw,13px); color: var(--gold); margin-top: 0.3vh; }
+
+  /* 股票牆 */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1.5vw;
+    flex: 1;
+  }
+  .stock-card {
+    background: var(--panel);
+    border: 2px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 2vh 1.5vw;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative;
+    min-height: 18vh;
+    transition: transform .15s;
+  }
+  .stock-card.selected { border-color: var(--gold); background:#1A2E42; }
+  .stock-card.dead {
+    background: #0A1420;
+    border-color: var(--dead);
+    opacity: 0.55;
+  }
+  .stock-name {
+    font-size: clamp(15px, 2vw, 19px);
+    font-weight: 700;
+    margin-bottom: 0.8vh;
+  }
+  .stock-price {
+    font-family: "Courier New", monospace;
+    font-size: clamp(24px, 4vw, 38px);
+    font-weight: 800;
+    letter-spacing: 1px;
+  }
+  .stock-price.up { color: var(--up); }
+  .stock-price.down { color: var(--down); }
+  .stock-arrow { font-size: clamp(14px,2vw,18px); margin-left: 4px; }
+  .stock-holding {
+    margin-top: 1vh;
+    font-size: clamp(12px, 1.6vw, 15px);
+    color: var(--text-dim);
+  }
+  .stock-holding.avg { font-weight: 700; }
+  .stock-holding.avg.up { color: var(--up); }
+  .stock-holding.avg.down { color: var(--down); }
+  .dead-label {
+    font-size: clamp(14px,2vw,18px);
+    color: var(--dead);
+    font-weight: 700;
+  }
+
+  /* 操作區 */
+  .action-bar {
+    margin-top: 2vh;
+    display: flex; gap: 1.5vw; flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1; min-width: 110px;
+    padding: 2.2vh 1vw;
+    font-size: clamp(16px, 2.4vw, 20px);
+    font-weight: 800;
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    color: #0B1929;
+    transition: transform .1s;
+  }
+  .btn:active { transform: scale(0.95); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-buy { background: var(--up); }
+  .btn-sell { background: var(--down); color: #fff; }
+  .btn-pass { background: var(--text-dim); color: #fff; }
+
+  .hint {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: clamp(13px, 1.8vw, 16px);
+    margin-top: 1.5vh;
+    min-height: 3vh;
+  }
+
+  /* 結束畫面 */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(11,25,41,0.97);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    padding: 5vw;
+  }
+  .overlay h1 { color: var(--gold); font-size: clamp(26px,5vw,44px); margin-bottom: 3vh; }
+  .rank-item {
+    width: min(500px, 80vw);
+    background: var(--panel);
+    border: 2px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 2vh 3vw;
+    margin-bottom: 1.5vh;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: clamp(16px,2.4vw,22px);
+  }
+  .rank-item.winner { border-color: var(--gold); background: #1A2E42; }
+  .rank-item .medal { font-size: clamp(20px,3vw,28px); margin-right: 1vw; }
+  .restart-btn {
+    margin-top: 3vh;
+    padding: 2vh 4vw;
+    font-size: clamp(16px,2.4vw,20px);
+    font-weight: 800;
+    background: var(--gold);
+    color: #0B1929;
+    border: none;
+    border-radius: 14px;
+  }
+
+  .note {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 1vh;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// ===== 遊戲設定 =====
+const MAX_PLAYERS = 5;
+const START_CASH = 1000;
+const COMPANIES = [
+  { name: "飛天披薩", price: 50 },
+  { name: "電玩巨獸", price: 40 },
+  { name: "甜甜圈王國", price: 30 },
+  { name: "火箭汽水", price: 60 },
+  { name: "機器狗狗", price: 45 },
+];
+const DEATH_PRICE = 5; // 跌到這個價位以下,公司就倒閉
+
+let state = { screen: 'setup', setupCount: null };
+
+function initGame(playerCount){
+  state = {
+    screen: 'game',
+    players: Array.from({length: playerCount}, (_, i) => ({
+      name: `玩家${i+1}`, cash: START_CASH, shares: {}, avgCost: {}
+    })),
+    companies: COMPANIES.map(c => ({ ...c, prevPrice:c.price, dead:false })),
+    turn: 0,
+    gameOver: false,
+    selectedCompany: null,
+    message: "選一家公司,然後決定要買股票、賣股票,買賣完可以繼續選別家,想換人就按「換人」。"
+  };
+  state.players.forEach(p => {
+    COMPANIES.forEach(c => { p.shares[c.name] = 0; p.avgCost[c.name] = 0; });
+  });
+  startPriceTimer();
+  render();
+}
+
+function currentPlayer(){ return state.players[state.turn % state.players.length]; }
+
+function calcTotal(p){
+  let total = p.cash;
+  state.companies.forEach(c => {
+    if (!c.dead) total += p.shares[c.name] * c.price;
+  });
+  return total;
+}
+
+function fmt(n){ return n.toLocaleString(); }
+
+function render(){
+  const app = document.getElementById('app');
+
+  if (state.screen === 'setup') {
+    const counts = Array.from({length: MAX_PLAYERS - 1}, (_, i) => i + 2); // 2~5
+    app.innerHTML = `
+      <div class="overlay">
+        <h1>📈 股票大亨</h1>
+        <div class="hint" style="margin-bottom:3vh;">先選一下：這局有幾個人一起玩？</div>
+        <div class="players-row" style="max-width:600px;">
+          ${counts.map(n => `
+            <div class="player-chip ${state.setupCount===n?'active':''}" style="cursor:pointer; padding:2.5vh 1vw;"
+                 onclick="chooseCount(${n})">
+              <div class="pcash">${n} 人</div>
+            </div>
+          `).join('')}
+        </div>
+        <button class="restart-btn" ${state.setupCount?'':'disabled'} onclick="initGame(state.setupCount)">開始遊戲</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (state.gameOver) {
+    const ranked = [...state.players].sort((a,b) => b.cash - a.cash);
+    const medals = ["🥇","🥈","🥉"];
+    app.innerHTML = `
+      <div class="overlay">
+        <h1>🎉 遊戲結束！所有公司都倒閉了 🎉</h1>
+        ${ranked.map((p,i) => `
+          <div class="rank-item ${i===0?'winner':''}">
+            <span><span class="medal">${medals[i]||"　"}</span>${p.name}</span>
+            <span>💰 $${fmt(p.cash)}</span>
+          </div>
+        `).join('')}
+        <button class="restart-btn" onclick="restartGame()">再玩一次</button>
+      </div>
+    `;
+    return;
+  }
+
+  const p = currentPlayer();
+  const allDead = state.companies.every(c => c.dead);
+
+  app.innerHTML = `
+    <div class="header">
+      <div class="title">📈 股票<span>大亨</span></div>
+      <div style="display:flex; gap:1.5vw; align-items:center;">
+        <div class="turn-badge">輪到：${p.name}</div>
+        <button class="btn btn-sell" style="flex:none; padding:1.2vh 1.5vw; font-size:clamp(13px,1.8vw,16px);" onclick="endGameNow()">結束遊戲</button>
+      </div>
+    </div>
+
+    <div class="players-row">
+      ${(() => {
+        const maxCash = Math.max(...state.players.map(pl => pl.cash));
+        return state.players.map((pl,i) => `
+        <div class="player-chip ${i===state.turn%state.players.length?'active':''}">
+          <div class="pname">${pl.name}${pl.cash === maxCash ? ' 💵' : ''}</div>
+          <div class="pcash">$${fmt(pl.cash)}</div>
+          <div class="ptotal">總財產 $${fmt(calcTotal(pl))}</div>
+        </div>
+      `).join('');
+      })()}
+    </div>
+
+    <div class="board">
+      ${state.companies.map(c => {
+        const diff = c.price - c.prevPrice;
+        const dirClass = diff > 0 ? 'up' : (diff < 0 ? 'down' : '');
+        const arrow = diff > 0 ? '▲' : (diff < 0 ? '▼' : '');
+        const holding = p.shares[c.name];
+        const avg = p.avgCost[c.name];
+        if (c.dead) {
+          return `
+            <div class="stock-card dead">
+              <div class="stock-name">${c.name}</div>
+              <div class="dead-label">已倒閉 💥</div>
+            </div>
+          `;
+        }
+        let avgLine = '';
+        if (holding > 0) {
+          const gain = c.price - avg;
+          const gainClass = gain > 0 ? 'up' : (gain < 0 ? 'down' : '');
+          const gainSign = gain > 0 ? '+' : '';
+          avgLine = `<div class="stock-holding avg ${gainClass}">買入均價 $${avg} (${gainSign}${gain})</div>`;
+        }
+        return `
+          <div class="stock-card ${state.selectedCompany===c.name?'selected':''}" onclick="selectCompany('${c.name}')">
+            <div class="stock-name">${c.name}</div>
+            <div class="stock-price ${dirClass}">$${c.price}<span class="stock-arrow">${arrow}</span></div>
+            <div class="stock-holding">你持有：${holding} 股</div>
+            ${avgLine}
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="action-bar">
+      <button class="btn btn-buy" ${!canBuy(p)?'disabled':''} onclick="doBuy()">買 1 股</button>
+      <button class="btn btn-sell" ${!canSell(p)?'disabled':''} onclick="doSell()">賣 1 股</button>
+      <button class="btn btn-pass" onclick="doEndTurn()">換人</button>
+    </div>
+
+    <div class="hint">${state.message}</div>
+    <div class="note">＊股價每 10 秒會自動變動一次,不管輪到誰</div>
+  `;
+}
+
+function canBuy(p){
+  if (!state.selectedCompany) return false;
+  const c = state.companies.find(c => c.name === state.selectedCompany);
+  if (!c || c.dead) return false;
+  return p.cash >= c.price;
+}
+function canSell(p){
+  if (!state.selectedCompany) return false;
+  const c = state.companies.find(c => c.name === state.selectedCompany);
+  if (!c) return false;
+  return p.shares[c.name] > 0;
+}
+
+function selectCompany(name){
+  const c = state.companies.find(c => c.name === name);
+  if (c.dead) return;
+  state.selectedCompany = (state.selectedCompany === name) ? null : name;
+  state.message = state.selectedCompany
+    ? `你選了「${state.selectedCompany}」，要買還是要賣呢？`
+    : "選一家公司,然後決定要買股票、賣股票,買賣完可以繼續選別家,想換人就按「換人」。";
+  render();
+}
+
+function doBuy(){
+  const p = currentPlayer();
+  const c = state.companies.find(c => c.name === state.selectedCompany);
+  if (!c || c.dead || p.cash < c.price) return;
+  const oldQty = p.shares[c.name];
+  const oldAvg = p.avgCost[c.name];
+  p.cash -= c.price;
+  p.shares[c.name] += 1;
+  p.avgCost[c.name] = Math.round((oldAvg * oldQty + c.price) / (oldQty + 1));
+  state.message = `${p.name} 買了 1 股「${c.name}」！還可以繼續買賣,或是按「換人」。`;
+  render();
+}
+
+function doSell(){
+  const p = currentPlayer();
+  const c = state.companies.find(c => c.name === state.selectedCompany);
+  if (!c || p.shares[c.name] <= 0) return;
+  p.shares[c.name] -= 1;
+  p.cash += c.price;
+  if (p.shares[c.name] === 0) p.avgCost[c.name] = 0;
+  state.message = `${p.name} 賣了 1 股「${c.name}」！還可以繼續買賣,或是按「換人」。`;
+  render();
+}
+
+function doEndTurn(){
+  const p = currentPlayer();
+  state.selectedCompany = null;
+  state.turn++;
+  state.message = `輪到 ${currentPlayer().name} 囉！`;
+  render();
+}
+
+function tickPrices(){
+  if (state.screen !== 'game' || state.gameOver) return;
+  updatePrices();
+  checkDeaths();
+  if (state.companies.every(c => c.dead)) {
+    state.gameOver = true;
+    stopPriceTimer();
+  }
+  render();
+}
+
+let priceTimer = null;
+function startPriceTimer(){
+  stopPriceTimer();
+  priceTimer = setInterval(tickPrices, 10000);
+}
+function stopPriceTimer(){
+  if (priceTimer) { clearInterval(priceTimer); priceTimer = null; }
+}
+
+function updatePrices(){
+  state.companies.forEach(c => {
+    if (c.dead) return;
+    c.prevPrice = c.price;
+    const change = Math.floor(Math.random() * 17) - 8; // -8 ~ +8
+    c.price = Math.max(0, c.price + change);
+  });
+}
+
+function checkDeaths(){
+  state.companies.forEach(c => {
+    if (!c.dead && c.price <= DEATH_PRICE) {
+      c.dead = true;
+      c.price = 0;
+    }
+  });
+}
+
+function endGameNow(){
+  state.gameOver = true;
+  stopPriceTimer();
+  render();
+}
+
+function chooseCount(n){
+  state.setupCount = n;
+  render();
+}
+
+function restartGame(){
+  const playerCount = state.players.length;
+  stopPriceTimer();
+  initGame(playerCount);
+}
+
+render();
+</script>
+</body>
+</html>
