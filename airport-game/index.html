@@ -357,8 +357,10 @@ function step(p, dt){
       break;
 
     case 'taxiWait':
+      // 螃蟹車把飛機轉成橫的、機頭朝右，才不會擋到停機坪的路
+      p.heading = Math.max(0, p.heading - 60 * dt);
       // 在滑行道上等玩家填跑道、等跑道空出來
-      if (p.depRunway && !state.runways[p.depRunway]) {
+      if (p.heading === 0 && p.depRunway && !state.runways[p.depRunway]) {
         const r = RUNWAYS[p.depRunway];
         state.runways[p.depRunway] = p.id;
         setPath(p, [{ x: p.x, y: TAXI_Y }, { x: r.end.x, y: TAXI_Y }, r.end], SPEED.taxi);
