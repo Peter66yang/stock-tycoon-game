@@ -14,7 +14,6 @@
     --gold: #F0B90B;
     --arr: #4FC3F7;
     --dep: #FFA94D;
-    --warn: #E74C3C;
     --grass: #16351F;
     --asphalt: #3A4756;
   }
@@ -102,24 +101,6 @@
 
   svg { width: 100%; height: auto; display: block; background: var(--grass); border-radius: 12px; border: 2px solid var(--panel-border); }
 
-  /* 交叉點警告 */
-  .conflict {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-    background: var(--warn); color: #fff;
-    border-radius: 12px; padding: 10px 16px;
-    font-weight: 800; text-align: center;
-    box-shadow: 0 4px 16px rgba(0,0,0,.5);
-    width: max-content; max-width: 95%;
-  }
-  .conflict button {
-    margin: 8px 6px 0;
-    font-size: 16px; font-weight: 800;
-    padding: 6px 14px;
-    border: none; border-radius: 8px;
-    background: #fff; color: var(--warn);
-    cursor: pointer;
-  }
-
   /* 選項視窗 */
   .overlay {
     position: fixed; inset: 0;
@@ -178,7 +159,6 @@
     </div>
     <div class="right">
       <svg id="map" viewBox="0 0 600 640"></svg>
-      <div id="conflict"></div>
     </div>
   </div>
 </div>
@@ -211,7 +191,7 @@ function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
 function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
 
 const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
-const ZONE = 35;     // 交叉點附近多遠算「快撞到」
+const ZONE = 35;     // 開過交叉點多遠，才算安全離開
 
 // ===== 遊戲狀態 =====
 const state = {
@@ -220,7 +200,7 @@ const state = {
   planes: [],
   runways: { 1: null, 2: null },  // 現在誰在用這條跑道
   gates: {},                      // 每個停機坪被誰用
-  conflict: null,                 // 在交叉點快撞的飛機（2 或 3 架）
+  center: null,                   // 現在誰在經過交叉點
   usedCodes: new Set(),
   dirty: true,
 };
@@ -248,7 +228,7 @@ function fmtTime(t){
 }
 
 // ===== 飛機沿著路線移動 =====
-function setPath(p, pts, speed, reverse){
+function setPath(p, pts, speed, reverse, waitIdx = 0){
   p.path = pts;
   p.lens = [0];
   for (let i = 1; i < pts.length; i++) {
@@ -257,9 +237,12 @@ function setPath(p, pts, speed, reverse){
   p.dist = 0;
   p.speed = speed;
   p.reverse = !!reverse;
-  // 路線有經過交叉點的話，記下「快撞區」在哪裡
+  // 路線有經過交叉點的話，記下交叉點在哪裡、出發前要在哪裡等
   const ci = pts.indexOf(CENTER);
-  p.zone = ci >= 0 ? { start: p.lens[ci] - ZONE, end: p.lens[ci] + ZONE } : null;
+  p.zone = ci >= 0 ? { end: p.lens[ci] + ZONE } : null;
+  p.waitAt = p.lens[waitIdx];
+  p.crossed = false;
+  p.centerSince = null;
 }
 function total(p){ return p.lens[p.lens.length - 1]; }
 function place(p){
@@ -284,7 +267,7 @@ function pt(x, y){ return { x, y }; }
 // 從滑行道的一邊，經過連接道，開到另一邊
 function viaConnector(fromY, toY, conn){
   const cx = CONNECTORS[conn];
-  if (conn === 'M') return [pt(cx, fromY), CENTER, pt(cx, toY)];
+  if (conn === 'M') return [pt(cx, fromY), CENTER, pt(cx, toY)];  // 在 pt(cx, fromY) 先等交叉點
   return [pt(cx, fromY), pt(cx, toY)];
 }
 
@@ -327,13 +310,21 @@ function step(p, dt){
       p.x = cx + Math.cos(p.angle) * 20;
       p.y = cy + Math.sin(p.angle) * 12;
       p.heading = p.angle * 180 / Math.PI + 90;
-      // 有填跑道、而且跑道沒人用 → 開始降落
+      // 有填跑道、跑道輪到它、交叉點也安全 → 開始降落；不然繼續繞圈圈
       if (p.arrRunway && myTurn(p, p.arrRunway)) {
+        if (p.centerSince == null) p.centerSince = state.clock;
+      } else {
+        p.centerSince = null;
+      }
+      if (p.centerSince != null && centerTurn(p)) {
+        const since = p.centerSince;
         const r = RUNWAYS[p.arrRunway];
         const u = unitFrom(r.start, r.end);
         const approach = pt(r.start.x - u.x * 90, r.start.y - u.y * 90);
         state.runways[p.arrRunway] = p.id;
+        state.center = p.id;
         setPath(p, [pt(p.x, p.y), approach, r.start, CENTER, r.end], SPEED.air);
+        p.centerSince = since;
         setPhase(p, 'landing');
       }
       break;
@@ -373,7 +364,7 @@ function step(p, dt){
         setPath(p, [here, pt(gx, TAXI1_Y), pt(gx, BOT_GATE_Y)], SPEED.taxi);
         setPhase(p, 'taxiIn');
       } else if (p.arrConn) {
-        setPath(p, [here, ...viaConnector(TAXI1_Y, TAXI2_Y, p.arrConn), pt(gx, TAXI2_Y), pt(gx, TOP_GATE_Y)], SPEED.taxi);
+        setPath(p, [here, ...viaConnector(TAXI1_Y, TAXI2_Y, p.arrConn), pt(gx, TAXI2_Y), pt(gx, TOP_GATE_Y)], SPEED.taxi, false, 1);
         setPhase(p, 'taxiIn');
       }
       break;
@@ -413,7 +404,7 @@ function step(p, dt){
         const route = [pt(p.x, p.y)];
         if (isTop(p.gate)) route.push(...viaConnector(TAXI2_Y, TAXI1_Y, p.depConn));
         route.push(pt(r.end.x, TAXI1_Y));
-        setPath(p, route, SPEED.taxi);
+        setPath(p, route, SPEED.taxi, false, isTop(p.gate) ? 1 : 0);
         setPhase(p, 'taxiOut');
       }
       break;
@@ -453,28 +444,33 @@ function step(p, dt){
   }
 }
 
-// 沿著路線移動，經過交叉點的時候要小心！
+// 沿著路線移動。要經過交叉點的話，在出發的地方先等，先等的先走
 function move(p, dt){
   let next = p.dist + p.speed * dt;
-  if (p.zone && p.dist <= p.zone.start && next > p.zone.start && !p.priority) {
-    const others = state.planes.filter(q => q !== p && q.zone && q.dist < total(q));
-    const inside = others.some(q => q.dist > q.zone.start && q.dist < q.zone.end);
-    const near = others.filter(q => q.dist <= q.zone.start && q.zone.start - q.dist < 90);
-    if (inside || near.some(q => q.priority)) {
-      next = p.zone.start;  // 別人在交叉點上，等它過去
-    } else if (near.length) {
-      // ⚠️ 好幾架都快到交叉點了 → 全部停下來，讓玩家選誰先走
-      if (!state.conflict) state.conflict = [];
-      for (const q of [p, ...near]) {
-        if (!state.conflict.includes(q.id)) state.conflict.push(q.id);
+  if (p.zone && !p.crossed && state.center !== p.id && next >= p.waitAt) {
+    next = p.waitAt;
+    if (p.dist >= p.waitAt) {
+      if (p.centerSince == null) p.centerSince = state.clock;
+      if (centerTurn(p)) {
+        state.center = p.id;
+        next = p.dist + p.speed * dt;
       }
-      next = p.zone.start;
     }
   }
   p.dist = Math.min(next, total(p));
-  if (p.zone && p.dist > p.zone.end) p.priority = false;
+  if (p.zone && state.center === p.id && p.dist > p.zone.end) {
+    state.center = null;
+    p.crossed = true;
+  }
   place(p);
   return p.dist >= total(p);
+}
+
+// 交叉點沒人在用，而且沒有比它更早在等的飛機
+function centerTurn(p){
+  if (state.center) return false;
+  return !state.planes.some(q => q !== p && q.centerSince != null && !q.crossed &&
+                                  q.centerSince < p.centerSince);
 }
 
 // 跑道空了，先等的飛機先用（不管是要降落還是要起飛）
@@ -594,33 +590,6 @@ function choose(id, field, value){
   closePicker();
 }
 
-// ===== 交叉點：玩家選誰先走 =====
-function renderConflict(){
-  const box = document.getElementById('conflict');
-  if (state.conflict) state.conflict = state.conflict.filter(id => state.planes.some(p => p.id === id));
-  if (!state.conflict || state.conflict.length < 2) {
-    state.conflict = null;
-    if (box.innerHTML) { box.innerHTML = ''; box.dataset.key = ''; }
-    return;
-  }
-  const key = state.conflict.join(',');
-  if (box.dataset.key === key) return;
-  box.dataset.key = key;
-  const planes = state.conflict.map(id => state.planes.find(p => p.id === id));
-  box.innerHTML = `
-    <div class="conflict">
-      ⚠️ ${planes.map(p => p.code).join('、')} 快在交叉點撞到了！誰先走？<br>
-      ${planes.map(p => `<button onclick="letGo(${p.id})">${p.code} 先走</button>`).join('')}
-    </div>
-  `;
-}
-function letGo(id){
-  const p = state.planes.find(q => q.id === id);
-  if (p) p.priority = true;
-  // 選完一架，剩下的還要再選
-  state.conflict = state.conflict && state.conflict.filter(x => x !== id);
-}
-
 // ===== 機場地圖 =====
 function drawAirport(){
   const road = (x1, y1, x2, y2, w) =>
@@ -673,11 +642,9 @@ const AIRPORT = drawAirport();
 const PLANE_SHAPE = '14,0 4,-2 0,-12 -4,-12 -2,-2 -10,-2 -13,-6 -15,-6 -14,0 -15,6 -13,6 -10,2 -2,2 -4,12 0,12 4,2';
 
 function renderMap(){
-  const conflictIds = state.conflict || [];
   const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
     const dep = DEP_PHASES.includes(p.phase);
-    const warn = conflictIds.includes(p.id);
-    const color = warn ? 'var(--warn)' : (dep ? 'var(--dep)' : 'var(--arr)');
+    const color = dep ? 'var(--dep)' : 'var(--arr)';
     const tug = p.phase === 'pushback'
       ? `<text x="${p.x}" y="${p.y + (isTop(p.gate) ? -18 : 26)}" font-size="14" text-anchor="middle">🦀</text>` : '';
     const small = p.phase === 'parked';
@@ -702,7 +669,6 @@ function loop(now){
   document.getElementById('clock').textContent = fmtTime(state.clock);
   if (state.dirty) { renderTable(); state.dirty = false; }
   renderMap();
-  renderConflict();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
