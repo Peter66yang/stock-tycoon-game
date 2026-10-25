@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>機場管制 第一版</title>
+<style>
+  :root{
+    --bg: #0B1929;
+    --panel: #0F2436;
+    --panel-border: #1E3A52;
+    --text: #E8EDF2;
+    --text-dim: #7C93A8;
+    --gold: #F0B90B;
+    --arr: #4FC3F7;
+    --dep: #FFA94D;
+    --warn: #E74C3C;
+    --grass: #16351F;
+    --asphalt: #3A4756;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    user-select: none;
+  }
+  #app { min-height: 100vh; display: flex; flex-direction: column; padding: 2vh 2vw; }
+
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 1.5vh;
+    border-bottom: 2px solid var(--panel-border);
+    padding-bottom: 1vh;
+  }
+  .title { font-size: clamp(20px, 3vw, 30px); font-weight: 800; letter-spacing: 2px; }
+  .title span { color: var(--gold); }
+  .clock {
+    font-family: "Courier New", monospace;
+    font-size: clamp(20px, 3vw, 30px);
+    font-weight: 800;
+    color: var(--gold);
+    background: var(--panel);
+    border: 2px solid var(--gold);
+    border-radius: 10px;
+    padding: 0.5vh 1.5vw;
+  }
+
+  /* 左邊航班表、右邊地圖 */
+  .main { display: flex; gap: 2vw; flex: 1; }
+  .left { flex: 0 0 38%; display: flex; flex-direction: column; }
+  .right { flex: 1; position: relative; }
+  @media (max-width: 760px) {
+    .main { flex-direction: column-reverse; }
+    .left { flex: none; }
+  }
+
+  .board {
+    background: #000;
+    border: 2px solid var(--panel-border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: clamp(13px, 1.6vw, 16px); }
+  th {
+    background: var(--panel);
+    color: var(--gold);
+    padding: 1vh 0.5vw;
+    font-weight: 700;
+  }
+  td {
+    padding: 0.9vh 0.5vw;
+    text-align: center;
+    border-top: 1px solid #1a2633;
+    font-family: "Courier New", monospace;
+    font-weight: 700;
+  }
+  td.code.arr { color: var(--arr); }
+  td.code.dep { color: var(--dep); }
+  td.pick { cursor: pointer; }
+  td.pick:hover { background: #1A2E42; }
+  td.pick .empty {
+    display: inline-block;
+    background: var(--gold); color: #0B1929;
+    border-radius: 6px; padding: 2px 8px;
+    font-family: inherit; font-size: 0.9em;
+    animation: blink 1.2s infinite;
+  }
+  td.pick .filled {
+    display: inline-block;
+    border: 1px dashed var(--text-dim);
+    border-radius: 6px; padding: 1px 8px;
+  }
+  td.none { color: var(--text-dim); }
+  @keyframes blink { 50% { opacity: 0.45; } }
+
+  .hint { color: var(--text-dim); font-size: clamp(12px, 1.5vw, 14px); margin-top: 1vh; line-height: 1.6; }
+
+  svg { width: 100%; height: auto; display: block; background: var(--grass); border-radius: 12px; border: 2px solid var(--panel-border); }
+
+  /* 交叉點警告 */
+  .conflict {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: var(--warn); color: #fff;
+    border-radius: 12px; padding: 10px 16px;
+    font-weight: 800; text-align: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5);
+    width: max-content; max-width: 95%;
+  }
+  .conflict button {
+    margin: 8px 6px 0;
+    font-size: 16px; font-weight: 800;
+    padding: 6px 14px;
+    border: none; border-radius: 8px;
+    background: #fff; color: var(--warn);
+    cursor: pointer;
+  }
+
+  /* 選項視窗 */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(11,25,41,0.8);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  .picker {
+    background: var(--panel);
+    border: 2px solid var(--gold);
+    border-radius: 14px;
+    padding: 20px;
+    width: min(420px, 90vw);
+    text-align: center;
+  }
+  .picker h2 { margin: 0 0 14px; color: var(--gold); font-size: 20px; }
+  .options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .options.two { grid-template-columns: repeat(2, 1fr); }
+  .opt {
+    padding: 12px 0;
+    font-size: 18px; font-weight: 800;
+    border: 2px solid var(--panel-border);
+    border-radius: 10px;
+    background: #1A2E42; color: var(--text);
+    cursor: pointer;
+  }
+  .opt.chosen { border-color: var(--gold); color: var(--gold); }
+  .opt:disabled { opacity: 0.3; cursor: not-allowed; text-decoration: line-through; }
+  .cancel {
+    margin-top: 14px;
+    padding: 8px 20px;
+    font-size: 15px;
+    border: none; border-radius: 8px;
+    background: var(--text-dim); color: #fff;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="title">🗼 機場<span>管制</span></div>
+    <div class="clock" id="clock">08:00:00</div>
+  </div>
+  <div class="main">
+    <div class="left">
+      <div class="board"><table id="table"></table></div>
+      <div class="hint">
+        👆 點黃色的「點我」來安排跑道和停機坪<br>
+        🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
+        🦀 起飛時間到，螃蟹車會自動把飛機推出來
+      </div>
+    </div>
+    <div class="right">
+      <svg id="map" viewBox="0 0 600 500"></svg>
+      <div id="conflict"></div>
+    </div>
+  </div>
+</div>
+<div id="picker"></div>
+
+<script>
+// ===== 遊戲設定（都是設計師決定的！）=====
+const START_TIME = 8 * 3600;      // 早上 08:00:00 開始
+const ARRIVAL_EVERY = 30;          // 每 30 秒來一架新飛機
+const PARK_MIN = 3 * 60;           // 停機坪最短停 3 分鐘
+const PARK_MAX = 7 * 60;           // 停機坪最長停 7 分鐘
+const GATE_COUNT = 10;             // 10 個停機坪
+const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛機
+
+// ===== 機場地圖的位置 =====
+const CENTER = { x: 300, y: 205 }; // 兩條跑道交叉的地方
+const RUNWAYS = {
+  1: { start: { x: 90,  y: 90 }, end: { x: 510, y: 320 } },
+  2: { start: { x: 510, y: 90 }, end: { x: 90,  y: 320 } },
+};
+const TAXI_Y = 370;  // 滑行道
+const GATE_Y = 450;  // 停機坪
+function gateX(g){ return 120 + (g - 1) * 40; }
+
+const SPEED = { air: 70, roll: 55, taxi: 30, push: 10 };
+const ZONE = 35;     // 交叉點附近多遠算「快撞到」
+
+// ===== 遊戲狀態 =====
+const state = {
+  clock: START_TIME,
+  nextArrival: START_TIME,
+  planes: [],
+  runways: { 1: null, 2: null },  // 現在誰在用這條跑道
+  gates: {},                      // 每個停機坪被誰用
+  conflict: null,                 // 交叉點快撞的兩架飛機
+  usedCodes: new Set(),
+  dirty: true,
+};
+for (let g = 1; g <= GATE_COUNT; g++) state.gates[g] = null;
+let nextId = 1;
+
+// 2 個英文字母 + 3 或 4 個數字
+function makeCode(){
+  const L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let code;
+  do {
+    const digits = Math.random() < 0.5 ? 3 : 4;
+    const num = Math.floor(Math.random() * 9 * 10 ** (digits - 1)) + 10 ** (digits - 1);
+    code = L[rand(0, 25)] + L[rand(0, 25)] + num;
+  } while (state.usedCodes.has(code));
+  state.usedCodes.add(code);
+  return code;
+}
+function rand(a, b){ return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+function fmtTime(t){
+  t = Math.floor(t);
+  const h = Math.floor(t / 3600) % 24, m = Math.floor(t / 60) % 60, s = t % 60;
+  return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+// ===== 飛機沿著路線移動 =====
+function setPath(p, pts, speed, reverse){
+  p.path = pts;
+  p.lens = [0];
+  for (let i = 1; i < pts.length; i++) {
+    p.lens.push(p.lens[i-1] + Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y));
+  }
+  p.dist = 0;
+  p.speed = speed;
+  p.reverse = !!reverse;
+  // 路線有經過交叉點的話，記下「快撞區」在哪裡
+  const ci = pts.indexOf(CENTER);
+  p.zone = ci >= 0 ? { start: p.lens[ci] - ZONE, end: p.lens[ci] + ZONE } : null;
+}
+function total(p){ return p.lens[p.lens.length - 1]; }
+function place(p){
+  const d = Math.min(p.dist, total(p));
+  let i = 1;
+  while (i < p.lens.length - 1 && p.lens[i] < d) i++;
+  const a = p.path[i-1], b = p.path[i];
+  const seg = p.lens[i] - p.lens[i-1] || 1;
+  const f = (d - p.lens[i-1]) / seg;
+  p.x = a.x + (b.x - a.x) * f;
+  p.y = a.y + (b.y - a.y) * f;
+  if (b.x !== a.x || b.y !== a.y) {
+    p.heading = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI + (p.reverse ? 180 : 0);
+  }
+}
+function unitFrom(a, b){
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  return { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+}
+
+// ===== 每一幀更新 =====
+function update(dt){
+  state.clock += dt;
+
+  // 每 30 秒排一班新飛機（提早放到航班表上）
+  while (state.nextArrival <= state.clock + LOOKAHEAD) {
+    state.planes.push({
+      id: nextId++, code: makeCode(), phase: 'scheduled',
+      arrTime: state.nextArrival, arrRunway: null, gate: null, depRunway: null,
+      x: -50, y: -50, heading: 0,
+    });
+    state.nextArrival += ARRIVAL_EVERY;
+    state.dirty = true;
+  }
+
+  for (const p of state.planes) step(p, dt);
+  state.planes = state.planes.filter(p => p.phase !== 'gone');
+}
+
+function setPhase(p, phase){ p.phase = phase; state.dirty = true; }
+
+function step(p, dt){
+  switch (p.phase) {
+    case 'scheduled':
+      if (state.clock >= p.arrTime) {
+        setPhase(p, 'holding');
+        p.slot = freeHoldSlot();
+        p.angle = 0;
+      }
+      break;
+
+    case 'holding': {
+      // 在天上繞圈圈等
+      p.angle += dt * 1.2;
+      const cx = 120 + p.slot * 72, cy = 38;
+      p.x = cx + Math.cos(p.angle) * 20;
+      p.y = cy + Math.sin(p.angle) * 14;
+      p.heading = p.angle * 180 / Math.PI + 90;
+      // 有填跑道、而且跑道沒人用 → 開始降落
+      if (p.arrRunway && !state.runways[p.arrRunway]) {
+        const r = RUNWAYS[p.arrRunway];
+        const u = unitFrom(r.start, r.end);
+        const approach = { x: r.start.x - u.x * 90, y: r.start.y - u.y * 90 };
+        state.runways[p.arrRunway] = p.id;
+        setPath(p, [{ x: p.x, y: p.y }, approach, r.start, CENTER, r.end], SPEED.air);
+        setPhase(p, 'landing');
+      }
+      break;
+    }
+
+    case 'landing':
+      if (p.dist > p.lens[2]) p.speed = SPEED.roll;  // 碰到跑道就慢下來
+      if (moveOnRunway(p, dt)) setPhase(p, 'runwayWait');
+      break;
+
+    case 'runwayWait':
+      // 在跑道上等停機坪
+      if (p.gate) {
+        const r = RUNWAYS[p.arrRunway];
+        const gx = gateX(p.gate);
+        state.runways[p.arrRunway] = null;
+        setPath(p, [r.end, { x: r.end.x, y: TAXI_Y }, { x: gx, y: TAXI_Y }, { x: gx, y: GATE_Y }], SPEED.taxi);
+        setPhase(p, 'taxiIn');
+      }
+      break;
+
+    case 'taxiIn':
+      if (move(p, dt)) {
+        p.depTime = state.clock + rand(PARK_MIN, PARK_MAX);
+        setPhase(p, 'parked');
+      }
+      break;
+
+    case 'parked':
+      if (state.clock >= p.depTime) {
+        // 🦀 螃蟹車自動把飛機推出來
+        const gx = gateX(p.gate);
+        setPath(p, [{ x: gx, y: GATE_Y }, { x: gx, y: TAXI_Y }], SPEED.push, true);
+        setPhase(p, 'pushback');
+      }
+      break;
+
+    case 'pushback':
+      if (move(p, dt)) {
+        state.gates[p.gate] = null;
+        setPhase(p, 'taxiWait');
+      }
+      break;
+
+    case 'taxiWait':
+      // 螃蟹車把飛機轉成橫的、機頭朝右，才不會擋到停機坪的路
+      p.heading = Math.max(0, p.heading - 60 * dt);
+      // 在滑行道上等玩家填跑道、等跑道空出來
+      if (p.heading === 0 && p.depRunway && !state.runways[p.depRunway]) {
+        const r = RUNWAYS[p.depRunway];
+        state.runways[p.depRunway] = p.id;
+        setPath(p, [{ x: p.x, y: TAXI_Y }, { x: r.end.x, y: TAXI_Y }, r.end], SPEED.taxi);
+        setPhase(p, 'taxiOut');
+      }
+      break;
+
+    case 'taxiOut':
+      if (move(p, dt)) {
+        const r = RUNWAYS[p.depRunway];
+        const u = unitFrom(r.end, r.start);
+        const away = { x: r.start.x + u.x * 140, y: r.start.y + u.y * 140 };
+        setPath(p, [r.end, CENTER, r.start, away], SPEED.roll);
+        setPhase(p, 'takeoff');
+      }
+      break;
+
+    case 'takeoff':
+      if (p.dist > p.lens[2]) {
+        p.speed = SPEED.air;
+        if (state.runways[p.depRunway] === p.id) state.runways[p.depRunway] = null;
+      }
+      if (moveOnRunway(p, dt)) setPhase(p, 'gone');
+      break;
+  }
+}
+
+function move(p, dt){
+  p.dist = Math.min(p.dist + p.speed * dt, total(p));
+  place(p);
+  return p.dist >= total(p);
+}
+
+// 在跑道上移動，要注意交叉點！
+function moveOnRunway(p, dt){
+  let next = p.dist + p.speed * dt;
+  if (p.zone && p.dist <= p.zone.start && next > p.zone.start && !p.priority) {
+    const o = state.planes.find(q => q !== p && (q.phase === 'landing' || q.phase === 'takeoff') && q.zone);
+    if (o) {
+      const oInside = o.dist > o.zone.start && o.dist < o.zone.end;
+      const oNear = o.dist <= o.zone.start && o.zone.start - o.dist < 90;
+      if (oInside || (oNear && o.priority)) {
+        next = p.zone.start;  // 別人在交叉點上，等它過去
+      } else if (oNear) {
+        // ⚠️ 兩架都快到交叉點了 → 兩架都停下來，讓玩家選誰先走
+        if (!state.conflict) state.conflict = [p.id, o.id];
+        next = p.zone.start;
+      }
+    }
+  }
+  p.dist = Math.min(next, total(p));
+  if (p.zone && p.dist > p.zone.end) p.priority = false;
+  place(p);
+  return p.dist >= total(p);
+}
+
+function freeHoldSlot(){
+  const used = state.planes.filter(p => p.phase === 'holding').map(p => p.slot);
+  let s = 0;
+  while (used.includes(s)) s++;
+  return s % 6;
+}
+
+// ===== 航班表 =====
+const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'taxiIn'];
+const DEP_PHASES = ['parked', 'pushback', 'taxiWait', 'taxiOut', 'takeoff'];
+
+function renderTable(){
+  const rows = [];
+  for (const p of state.planes) {
+    if (ARR_PHASES.includes(p.phase)) rows.push({ p, dep: false, time: p.arrTime });
+    if (DEP_PHASES.includes(p.phase)) rows.push({ p, dep: true, time: p.depTime });
+  }
+  rows.sort((a, b) => a.time - b.time);
+
+  const cell = (p, field, value, canPick) => {
+    if (!canPick) return `<td>${value ? value + ' 號' : '—'}</td>`;
+    const inner = value ? `<span class="filled">${value} 號</span>` : `<span class="empty">點我</span>`;
+    return `<td class="pick" onclick="openPicker(${p.id}, '${field}')">${inner}</td>`;
+  };
+
+  document.getElementById('table').innerHTML = `
+    <thead><tr><th>航班代碼</th><th>時間</th><th>跑道</th><th>停機坪</th></tr></thead>
+    <tbody>
+      ${rows.map(({ p, dep, time }) => dep ? `
+        <tr>
+          <td class="code dep">${p.code} 🛫</td>
+          <td>${fmtTime(time)}</td>
+          ${cell(p, 'depRunway', p.depRunway, p.phase !== 'taxiOut' && p.phase !== 'takeoff')}
+          <td class="none">—</td>
+        </tr>` : `
+        <tr>
+          <td class="code arr">${p.code} 🛬</td>
+          <td>${fmtTime(time)}</td>
+          ${cell(p, 'arrRunway', p.arrRunway, p.phase === 'scheduled' || p.phase === 'holding')}
+          ${cell(p, 'gate', p.gate, p.phase !== 'taxiIn')}
+        </tr>`).join('')}
+    </tbody>
+  `;
+}
+
+// ===== 點格子 → 跳出選項 =====
+function openPicker(id, field){
+  const p = state.planes.find(q => q.id === id);
+  if (!p) return;
+  const isGate = field === 'gate';
+  const choices = isGate
+    ? Array.from({ length: GATE_COUNT }, (_, i) => i + 1)
+    : [1, 2];
+  document.getElementById('picker').innerHTML = `
+    <div class="overlay" onclick="closePicker()">
+      <div class="picker" onclick="event.stopPropagation()">
+        <h2>${p.code}：選${isGate ? '停機坪' : '跑道'}</h2>
+        <div class="options ${isGate ? '' : 'two'}">
+          ${choices.map(n => {
+            // 已經有別的飛機的停機坪不能選
+            const taken = isGate && state.gates[n] && state.gates[n] !== p.id;
+            return `<button class="opt ${p[field] === n ? 'chosen' : ''}" ${taken ? 'disabled' : ''}
+                      onclick="choose(${p.id}, '${field}', ${n})">${n}${isGate ? '' : ' 號跑道'}</button>`;
+          }).join('')}
+        </div>
+        ${p[field] ? `<button class="cancel" onclick="choose(${p.id}, '${field}', null)">清除這格</button>` : ''}
+        <button class="cancel" onclick="closePicker()">取消</button>
+      </div>
+    </div>
+  `;
+}
+function closePicker(){ document.getElementById('picker').innerHTML = ''; }
+
+function choose(id, field, n){
+  const p = state.planes.find(q => q.id === id);
+  if (!p) return closePicker();
+  if (field === 'gate') {
+    if (n && state.gates[n] && state.gates[n] !== p.id) return;
+    if (p.gate) state.gates[p.gate] = null;
+    if (n) state.gates[n] = p.id;
+  }
+  p[field] = n;
+  state.dirty = true;
+  closePicker();
+}
+
+// ===== 交叉點：玩家選誰先走 =====
+function renderConflict(){
+  const box = document.getElementById('conflict');
+  const ids = state.conflict;
+  const planes = ids && ids.map(id => state.planes.find(p => p.id === id));
+  if (!planes || planes.some(p => !p)) {
+    state.conflict = null;
+    if (box.innerHTML) box.innerHTML = '';
+    return;
+  }
+  const key = ids.join(',');
+  if (box.dataset.key === key && box.innerHTML) return;
+  box.dataset.key = key;
+  box.innerHTML = `
+    <div class="conflict">
+      ⚠️ ${planes[0].code} 和 ${planes[1].code} 快在交叉點撞到了！誰先走？<br>
+      ${planes.map(p => `<button onclick="letGo(${p.id})">${p.code} 先走</button>`).join('')}
+    </div>
+  `;
+}
+function letGo(id){
+  const p = state.planes.find(q => q.id === id);
+  if (p) p.priority = true;
+  state.conflict = null;
+  document.getElementById('conflict').innerHTML = '';
+}
+
+// ===== 機場地圖 =====
+function drawAirport(){
+  const rw = r => `<line x1="${r.start.x}" y1="${r.start.y}" x2="${r.end.x}" y2="${r.end.y}"
+                     stroke="var(--asphalt)" stroke-width="26" stroke-linecap="square"/>
+                   <line x1="${r.start.x}" y1="${r.start.y}" x2="${r.end.x}" y2="${r.end.y}"
+                     stroke="#fff" stroke-width="2" stroke-dasharray="14 12" opacity=".7"/>`;
+  const label = (r, n) => `<text x="${r.start.x}" y="${r.start.y + 32}" fill="#fff" font-size="14"
+                             font-weight="800" text-anchor="middle">${n} 號跑道</text>`;
+  let gates = '';
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    const x = gateX(g);
+    gates += `<line x1="${x}" y1="${TAXI_Y}" x2="${x}" y2="${GATE_Y}" stroke="var(--asphalt)" stroke-width="10"/>
+              <rect x="${x - 16}" y="${GATE_Y - 16}" width="32" height="40" rx="4"
+                    fill="#22313f" stroke="#F0B90B" stroke-width="1.5" stroke-dasharray="4 3"/>
+              <text x="${x}" y="${GATE_Y + 38}" fill="#F0B90B" font-size="13" font-weight="800" text-anchor="middle">${g}</text>`;
+  }
+  return `
+    <rect x="0" y="0" width="600" height="70" fill="#123a5a"/>
+    <text x="590" y="14" fill="#7C93A8" font-size="11" text-anchor="end">☁️ 天空：等待降落的飛機在這裡繞圈圈</text>
+    ${[1, 2].map(n => `<line x1="${RUNWAYS[n].end.x}" y1="${RUNWAYS[n].end.y}" x2="${RUNWAYS[n].end.x}" y2="${TAXI_Y}"
+                          stroke="var(--asphalt)" stroke-width="12"/>`).join('')}
+    <line x1="${RUNWAYS[2].end.x}" y1="${TAXI_Y}" x2="${RUNWAYS[1].end.x}" y2="${TAXI_Y}"
+          stroke="var(--asphalt)" stroke-width="14" stroke-linecap="round"/>
+    <text x="300" y="${TAXI_Y - 12}" fill="#7C93A8" font-size="12" text-anchor="middle">滑行道</text>
+    ${rw(RUNWAYS[1])}${rw(RUNWAYS[2])}
+    ${label(RUNWAYS[1], 1)}${label(RUNWAYS[2], 2)}
+    ${gates}
+    <text x="300" y="${GATE_Y + 47}" fill="#7C93A8" font-size="11" text-anchor="middle">停機坪</text>
+  `;
+}
+const AIRPORT = drawAirport();
+
+const PLANE_SHAPE = '14,0 4,-2 0,-12 -4,-12 -2,-2 -10,-2 -13,-6 -15,-6 -14,0 -15,6 -13,6 -10,2 -2,2 -4,12 0,12 4,2';
+
+function renderMap(){
+  const conflictIds = state.conflict || [];
+  const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
+    const dep = DEP_PHASES.includes(p.phase);
+    const warn = conflictIds.includes(p.id);
+    const color = warn ? 'var(--warn)' : (dep ? 'var(--dep)' : 'var(--arr)');
+    const tug = p.phase === 'pushback'
+      ? `<text x="${p.x}" y="${p.y + 26}" font-size="14" text-anchor="middle">🦀</text>` : '';
+    return `
+      <g>
+        <polygon points="${PLANE_SHAPE}" fill="${color}" stroke="#0B1929" stroke-width="1"
+                 transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>
+        <text x="${p.x}" y="${p.y - 15}" fill="#fff" font-size="${p.phase === 'parked' ? 8 : 11}" font-weight="700"
+              text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
+        ${tug}
+      </g>`;
+  }).join('');
+  document.getElementById('map').innerHTML = AIRPORT + planes;
+}
+
+// ===== 遊戲迴圈 =====
+let last = performance.now();
+function loop(now){
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  update(dt);
+  document.getElementById('clock').textContent = fmtTime(state.clock);
+  if (state.dirty) { renderTable(); state.dirty = false; }
+  renderMap();
+  renderConflict();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
