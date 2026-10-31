@@ -243,6 +243,9 @@ function setPath(p, pts, speed, reverse, waitIdx = 0){
   p.waitAt = p.lens[waitIdx];
   p.crossed = false;
   p.centerSince = null;
+  p.roadRes = null;       // 正在用的那一段路
+  p.roadWant = null;      // 想要開上去、正在等的那一段路
+  p.freeRunwayAt = null;  // 開到這個點，就把跑道讓出來
 }
 function total(p){ return p.lens[p.lens.length - 1]; }
 function place(p){
@@ -339,7 +342,6 @@ function step(p, dt){
       // 在跑道上等停機坪
       if (p.gate) {
         const r = RUNWAYS[p.arrRunway];
-        state.runways[p.arrRunway] = null;
         if (isTop(p.gate)) {
           // 上面的停機坪：先開到滑行道 1，再看要走哪條連接道
           setPath(p, [r.end, pt(r.end.x, TAXI1_Y)], SPEED.taxi);
@@ -349,6 +351,7 @@ function step(p, dt){
           setPath(p, [r.end, pt(r.end.x, TAXI1_Y), pt(gx, TAXI1_Y), pt(gx, BOT_GATE_Y)], SPEED.taxi);
           setPhase(p, 'taxiIn');
         }
+        p.freeRunwayAt = 1;  // 開到滑行道 1 才把跑道讓出來
       }
       break;
 
@@ -447,7 +450,12 @@ function step(p, dt){
 // 沿著路線移動。要經過交叉點的話，在出發的地方先等，先等的先走
 function move(p, dt){
   let next = p.dist + p.speed * dt;
-  if (p.zone && !p.crossed && state.center !== p.id && next >= p.waitAt) {
+  // 🛣️ 要開上一段路之前，先看有沒有飛機對著開過來；有的話在路口先等，先等的先走
+  const k = enteringSegment(p, next);
+  const roadBlocked = k != null && !roadOK(p, k);
+  if (roadBlocked) next = p.lens[k];
+  // ✳️ 要經過交叉點的話，在出發的地方先等，先等的先走
+  if (!roadBlocked && p.zone && !p.crossed && state.center !== p.id && next >= p.waitAt) {
     next = p.waitAt;
     if (p.dist >= p.waitAt) {
       if (p.centerSince == null) p.centerSince = state.clock;
@@ -462,8 +470,50 @@ function move(p, dt){
     state.center = null;
     p.crossed = true;
   }
+  if (p.roadRes && p.dist >= p.lens[p.roadRes.last + 1]) p.roadRes = null;
+  if (p.freeRunwayAt != null && p.dist >= p.lens[p.freeRunwayAt]) {
+    if (state.runways[p.arrRunway] === p.id) state.runways[p.arrRunway] = null;
+    p.freeRunwayAt = null;
+  }
   place(p);
   return p.dist >= total(p);
+}
+
+// 這一段是哪一條路？（滑行道 1、滑行道 2、左邊的路、中間連接道、右邊的路）
+function roadOf(a, b){
+  if (a.y === b.y && a.x !== b.x && (a.y === TAXI1_Y || a.y === TAXI2_Y)) return 'T' + a.y;
+  if (a.x === b.x && a.y !== b.y && Object.values(CONNECTORS).includes(a.x)) return 'V' + a.x;
+  return null;
+}
+
+// 這一步會不會開上新的一段路？會的話是第幾段
+function enteringSegment(p, next){
+  for (let k = 0; k < p.path.length - 1; k++) {
+    if (p.lens[k] < p.dist || p.lens[k] >= next) continue;
+    if (!roadOf(p.path[k], p.path[k + 1])) continue;
+    if (p.roadRes && p.roadRes.road === roadOf(p.path[k], p.path[k + 1]) && k <= p.roadRes.last) continue;
+    return k;
+  }
+  return null;
+}
+
+// 可以開上這段路嗎？有飛機對著開過來、或是有更早在等的飛機要對著開，就要等
+function roadOK(p, k){
+  const road = roadOf(p.path[k], p.path[k + 1]);
+  let e = k;
+  while (e + 2 < p.path.length && roadOf(p.path[e + 1], p.path[e + 2]) === road) e++;
+  const a = p.path[k], b = p.path[e + 1];
+  const from = road[0] === 'T' ? a.x : a.y, to = road[0] === 'T' ? b.x : b.y;
+  const req = { road, dir: Math.sign(to - from), lo: Math.min(from, to), hi: Math.max(from, to), last: e };
+  if (!p.roadWant || p.roadWant.road !== road) p.roadWant = { ...req, since: state.clock };
+  const clash = q => q.road === req.road && q.dir !== req.dir && q.lo < req.hi + 25 && req.lo < q.hi + 25;
+  const earlier = q => q.roadWant.since < p.roadWant.since || (q.roadWant.since === p.roadWant.since && q.id < p.id);
+  const blocked = state.planes.some(q => q !== p &&
+    ((q.roadRes && clash(q.roadRes)) || (q.roadWant && clash(q.roadWant) && earlier(q))));
+  if (blocked) return false;
+  p.roadRes = req;
+  p.roadWant = null;
+  return true;
 }
 
 // 交叉點沒人在用，而且沒有比它更早在等的飛機
