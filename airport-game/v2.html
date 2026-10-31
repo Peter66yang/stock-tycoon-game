@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>機場管制 第二版</title>
+<style>
+  :root{
+    --bg: #0B1929;
+    --panel: #0F2436;
+    --panel-border: #1E3A52;
+    --text: #E8EDF2;
+    --text-dim: #7C93A8;
+    --gold: #F0B90B;
+    --arr: #4FC3F7;
+    --dep: #FFA94D;
+    --grass: #16351F;
+    --asphalt: #3A4756;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    user-select: none;
+  }
+  #app { min-height: 100vh; display: flex; flex-direction: column; padding: 2vh 2vw; }
+
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 1.5vh;
+    border-bottom: 2px solid var(--panel-border);
+    padding-bottom: 1vh;
+  }
+  .title { font-size: clamp(20px, 3vw, 30px); font-weight: 800; letter-spacing: 2px; }
+  .title span { color: var(--gold); }
+  .title small { font-size: 0.5em; color: var(--text-dim); letter-spacing: 0; margin-left: 6px; }
+  .clock {
+    font-family: "Courier New", monospace;
+    font-size: clamp(20px, 3vw, 30px);
+    font-weight: 800;
+    color: var(--gold);
+    background: var(--panel);
+    border: 2px solid var(--gold);
+    border-radius: 10px;
+    padding: 0.5vh 1.5vw;
+  }
+
+  /* 左邊航班表、右邊地圖 */
+  .main { display: flex; gap: 2vw; flex: 1; }
+  .left { flex: 0 0 42%; display: flex; flex-direction: column; }
+  .right { flex: 1; position: relative; }
+  @media (max-width: 760px) {
+    .main { flex-direction: column-reverse; }
+    .left { flex: none; }
+  }
+
+  .board {
+    background: #000;
+    border: 2px solid var(--panel-border);
+    border-radius: 12px;
+    overflow: auto;
+    max-height: 78vh;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: clamp(12px, 1.4vw, 15px); }
+  th {
+    background: var(--panel);
+    color: var(--gold);
+    padding: 1vh 0.3vw;
+    font-weight: 700;
+    position: sticky; top: 0;
+  }
+  td {
+    padding: 0.8vh 0.3vw;
+    text-align: center;
+    border-top: 1px solid #1a2633;
+    font-family: "Courier New", monospace;
+    font-weight: 700;
+  }
+  td.code.arr { color: var(--arr); }
+  td.code.dep { color: var(--dep); }
+  td.pick { cursor: pointer; }
+  td.pick:hover { background: #1A2E42; }
+  td.pick .empty {
+    display: inline-block;
+    background: var(--gold); color: #0B1929;
+    border-radius: 6px; padding: 2px 8px;
+    font-family: inherit; font-size: 0.9em;
+    animation: blink 1.2s infinite;
+  }
+  td.pick .filled {
+    display: inline-block;
+    border: 1px dashed var(--text-dim);
+    border-radius: 6px; padding: 1px 8px;
+  }
+  td.none { color: var(--text-dim); }
+  @keyframes blink { 50% { opacity: 0.45; } }
+
+  .hint { color: var(--text-dim); font-size: clamp(12px, 1.5vw, 14px); margin-top: 1vh; line-height: 1.6; }
+
+  svg { width: 100%; height: auto; display: block; background: var(--grass); border-radius: 12px; border: 2px solid var(--panel-border); }
+
+  /* 選項視窗 */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(11,25,41,0.8);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  .picker {
+    background: var(--panel);
+    border: 2px solid var(--gold);
+    border-radius: 14px;
+    padding: 20px;
+    width: min(440px, 92vw);
+    text-align: center;
+  }
+  .picker h2 { margin: 0 0 14px; color: var(--gold); font-size: 20px; }
+  .picker h3 { margin: 10px 0 6px; color: var(--text-dim); font-size: 14px; font-weight: 600; }
+  .options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .options.two { grid-template-columns: repeat(2, 1fr); }
+  .options.three { grid-template-columns: repeat(3, 1fr); }
+  .opt {
+    padding: 12px 0;
+    font-size: 18px; font-weight: 800;
+    border: 2px solid var(--panel-border);
+    border-radius: 10px;
+    background: #1A2E42; color: var(--text);
+    cursor: pointer;
+  }
+  .opt.chosen { border-color: var(--gold); color: var(--gold); }
+  .opt:disabled { opacity: 0.3; cursor: not-allowed; text-decoration: line-through; }
+  .cancel {
+    margin-top: 14px;
+    padding: 8px 20px;
+    font-size: 15px;
+    border: none; border-radius: 8px;
+    background: var(--text-dim); color: #fff;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <div class="title">🗼 機場<span>管制</span><small>第二版</small></div>
+    <div class="clock" id="clock">08:00:00</div>
+  </div>
+  <div class="main">
+    <div class="left">
+      <div class="board"><table id="table"></table></div>
+      <div class="hint">
+        👆 點黃色的「點我」來安排跑道、停機坪和連接道<br>
+        🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
+        🛣️ 停機坪 11～20 號在上面，要填「連接道」才過得去<br>
+        🦀 起飛時間到，螃蟹車會自動把飛機推出來
+      </div>
+    </div>
+    <div class="right">
+      <svg id="map" viewBox="0 0 600 640"></svg>
+    </div>
+  </div>
+</div>
+<div id="picker"></div>
+
+<script>
+// ===== 遊戲設定（都是設計師決定的！）=====
+const START_TIME = 8 * 3600;      // 早上 08:00:00 開始
+const ARRIVAL_EVERY = 15;          // 每 15 秒來一架新飛機
+const PARK_MIN = 3 * 60;           // 停機坪最短停 3 分鐘
+const PARK_MAX = 7 * 60;           // 停機坪最長停 7 分鐘
+const GATE_COUNT = 20;             // 20 個停機坪：1～10 在下面、11～20 在上面
+const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛機
+
+// ===== 機場地圖的位置 =====
+const CENTER = { x: 300, y: 330 }; // 兩條跑道和中間連接道交叉的地方
+const RUNWAYS = {
+  1: { start: { x: 90,  y: 200 }, end: { x: 510, y: 460 } },
+  2: { start: { x: 510, y: 200 }, end: { x: 90,  y: 460 } },
+};
+const TAXI1_Y = 510;  // 下面的滑行道 1
+const TAXI2_Y = 150;  // 上面的滑行道 2
+const BOT_GATE_Y = 575;
+const TOP_GATE_Y = 95;
+const CONNECTORS = { L: 50, M: 300, R: 550 };     // 左邊的路、中間連接道、右邊的路
+const CONN_NAME = { L: '左', M: '中', R: '右' };
+function isTop(g){ return g > 10; }
+function gateX(g){ return 120 + ((g - 1) % 10) * 40; }
+function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
+function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
+
+const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
+const ZONE = 35;     // 開過交叉點多遠，才算安全離開
+
+// ===== 遊戲狀態 =====
+const state = {
+  clock: START_TIME,
+  nextArrival: START_TIME,
+  planes: [],
+  runways: { 1: null, 2: null },  // 現在誰在用這條跑道
+  gates: {},                      // 每個停機坪被誰用
+  center: null,                   // 現在誰在經過交叉點
+  usedCodes: new Set(),
+  dirty: true,
+};
+for (let g = 1; g <= GATE_COUNT; g++) state.gates[g] = null;
+let nextId = 1;
+
+// 2 個英文字母 + 3 或 4 個數字
+function makeCode(){
+  const L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let code;
+  do {
+    const digits = Math.random() < 0.5 ? 3 : 4;
+    const num = Math.floor(Math.random() * 9 * 10 ** (digits - 1)) + 10 ** (digits - 1);
+    code = L[rand(0, 25)] + L[rand(0, 25)] + num;
+  } while (state.usedCodes.has(code));
+  state.usedCodes.add(code);
+  return code;
+}
+function rand(a, b){ return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+function fmtTime(t){
+  t = Math.floor(t);
+  const h = Math.floor(t / 3600) % 24, m = Math.floor(t / 60) % 60, s = t % 60;
+  return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+// ===== 飛機沿著路線移動 =====
+function setPath(p, pts, speed, reverse, waitIdx = 0){
+  p.path = pts;
+  p.lens = [0];
+  for (let i = 1; i < pts.length; i++) {
+    p.lens.push(p.lens[i-1] + Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y));
+  }
+  p.dist = 0;
+  p.speed = speed;
+  p.reverse = !!reverse;
+  // 路線有經過交叉點的話，記下交叉點在哪裡、出發前要在哪裡等
+  const ci = pts.indexOf(CENTER);
+  p.zone = ci >= 0 ? { end: p.lens[ci] + ZONE } : null;
+  p.waitAt = p.lens[waitIdx];
+  p.crossed = false;
+  p.centerSince = null;
+  p.roadRes = null;       // 正在用的那一段路
+  p.roadWant = null;      // 想要開上去、正在等的那一段路
+  p.freeRunwayAt = null;  // 開到這個點，就把跑道讓出來
+}
+function total(p){ return p.lens[p.lens.length - 1]; }
+function place(p){
+  const d = Math.min(p.dist, total(p));
+  let i = 1;
+  while (i < p.lens.length - 1 && p.lens[i] < d) i++;
+  const a = p.path[i-1], b = p.path[i];
+  const seg = p.lens[i] - p.lens[i-1] || 1;
+  const f = (d - p.lens[i-1]) / seg;
+  p.x = a.x + (b.x - a.x) * f;
+  p.y = a.y + (b.y - a.y) * f;
+  if (b.x !== a.x || b.y !== a.y) {
+    p.heading = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI + (p.reverse ? 180 : 0);
+  }
+}
+function unitFrom(a, b){
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  return { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+}
+function pt(x, y){ return { x, y }; }
+
+// 從滑行道的一邊，經過連接道，開到另一邊
+function viaConnector(fromY, toY, conn){
+  const cx = CONNECTORS[conn];
+  if (conn === 'M') return [pt(cx, fromY), CENTER, pt(cx, toY)];  // 在 pt(cx, fromY) 先等交叉點
+  return [pt(cx, fromY), pt(cx, toY)];
+}
+
+// ===== 每一幀更新 =====
+function update(dt){
+  state.clock += dt;
+
+  // 每 15 秒排一班新飛機（提早放到航班表上）
+  while (state.nextArrival <= state.clock + LOOKAHEAD) {
+    state.planes.push({
+      id: nextId++, code: makeCode(), phase: 'scheduled',
+      arrTime: state.nextArrival,
+      arrRunway: null, gate: null, arrConn: null, depRunway: null, depConn: null,
+      x: -50, y: -50, heading: 0,
+    });
+    state.nextArrival += ARRIVAL_EVERY;
+    state.dirty = true;
+  }
+
+  for (const p of state.planes) step(p, dt);
+  state.planes = state.planes.filter(p => p.phase !== 'gone');
+}
+
+function setPhase(p, phase){ p.phase = phase; state.dirty = true; }
+
+function step(p, dt){
+  switch (p.phase) {
+    case 'scheduled':
+      if (state.clock >= p.arrTime) {
+        setPhase(p, 'holding');
+        p.slot = freeHoldSlot();
+        p.angle = 0;
+      }
+      break;
+
+    case 'holding': {
+      // 在天上繞圈圈等
+      p.angle += dt * 1.2;
+      const cx = 60 + p.slot * 68, cy = 30;
+      p.x = cx + Math.cos(p.angle) * 20;
+      p.y = cy + Math.sin(p.angle) * 12;
+      p.heading = p.angle * 180 / Math.PI + 90;
+      // 有填跑道、跑道輪到它、交叉點也安全 → 開始降落；不然繼續繞圈圈
+      if (p.arrRunway && myTurn(p, p.arrRunway)) {
+        if (p.centerSince == null) p.centerSince = state.clock;
+      } else {
+        p.centerSince = null;
+      }
+      if (p.centerSince != null && centerTurn(p)) {
+        const since = p.centerSince;
+        const r = RUNWAYS[p.arrRunway];
+        const u = unitFrom(r.start, r.end);
+        const approach = pt(r.start.x - u.x * 90, r.start.y - u.y * 90);
+        state.runways[p.arrRunway] = p.id;
+        state.center = p.id;
+        setPath(p, [pt(p.x, p.y), approach, r.start, CENTER, r.end], SPEED.air);
+        p.centerSince = since;
+        setPhase(p, 'landing');
+      }
+      break;
+    }
+
+    case 'landing':
+      if (p.dist > p.lens[2]) p.speed = SPEED.roll;  // 碰到跑道就慢下來
+      if (move(p, dt)) setPhase(p, 'runwayWait');
+      break;
+
+    case 'runwayWait':
+      // 在跑道上等停機坪
+      if (p.gate) {
+        const r = RUNWAYS[p.arrRunway];
+        if (isTop(p.gate)) {
+          // 上面的停機坪：先開到滑行道 1，再看要走哪條連接道
+          setPath(p, [r.end, pt(r.end.x, TAXI1_Y)], SPEED.taxi);
+          setPhase(p, 'exitRunway');
+        } else {
+          const gx = gateX(p.gate);
+          setPath(p, [r.end, pt(r.end.x, TAXI1_Y), pt(gx, TAXI1_Y), pt(gx, BOT_GATE_Y)], SPEED.taxi);
+          setPhase(p, 'taxiIn');
+        }
+        p.freeRunwayAt = 1;  // 開到滑行道 1 才把跑道讓出來
+      }
+      break;
+
+    case 'exitRunway':
+      if (move(p, dt)) setPhase(p, 'connWait');
+      break;
+
+    case 'connWait': {
+      // 在滑行道 1 上等玩家填連接道
+      const here = pt(p.x, p.y);
+      const gx = gateX(p.gate);
+      if (!isTop(p.gate)) {
+        setPath(p, [here, pt(gx, TAXI1_Y), pt(gx, BOT_GATE_Y)], SPEED.taxi);
+        setPhase(p, 'taxiIn');
+      } else if (p.arrConn) {
+        setPath(p, [here, ...viaConnector(TAXI1_Y, TAXI2_Y, p.arrConn), pt(gx, TAXI2_Y), pt(gx, TOP_GATE_Y)], SPEED.taxi, false, 1);
+        setPhase(p, 'taxiIn');
+      }
+      break;
+    }
+
+    case 'taxiIn':
+      if (move(p, dt)) {
+        p.depTime = state.clock + rand(PARK_MIN, PARK_MAX);
+        setPhase(p, 'parked');
+      }
+      break;
+
+    case 'parked':
+      if (state.clock >= p.depTime) {
+        // 🦀 螃蟹車自動把飛機推出來
+        const gx = gateX(p.gate);
+        setPath(p, [pt(gx, gateY(p.gate)), pt(gx, taxiY(p.gate))], SPEED.push, true);
+        setPhase(p, 'pushback');
+      }
+      break;
+
+    case 'pushback':
+      if (move(p, dt)) {
+        state.gates[p.gate] = null;
+        setPhase(p, 'taxiWait');
+      }
+      break;
+
+    case 'taxiWait': {
+      // 螃蟹車把飛機轉成橫的、機頭朝右，才不會擋到停機坪的路
+      const turn = 60 * dt;
+      p.heading = p.heading > 0 ? Math.max(0, p.heading - turn) : Math.min(0, p.heading + turn);
+      // 在滑行道上等玩家填跑道（上面的飛機還要填連接道）
+      const ready = p.depRunway && (!isTop(p.gate) || p.depConn);
+      if (p.heading === 0 && ready) {
+        const r = RUNWAYS[p.depRunway];
+        const route = [pt(p.x, p.y)];
+        if (isTop(p.gate)) route.push(...viaConnector(TAXI2_Y, TAXI1_Y, p.depConn));
+        route.push(pt(r.end.x, TAXI1_Y));
+        setPath(p, route, SPEED.taxi, false, isTop(p.gate) ? 1 : 0);
+        setPhase(p, 'taxiOut');
+      }
+      break;
+    }
+
+    case 'taxiOut':
+      if (move(p, dt)) { p.waitSince = state.clock; setPhase(p, 'holdShort'); }
+      break;
+
+    case 'holdShort':
+      // 在跑道旁邊等跑道空出來
+      if (myTurn(p, p.depRunway)) {
+        const r = RUNWAYS[p.depRunway];
+        state.runways[p.depRunway] = p.id;
+        setPath(p, [pt(p.x, p.y), r.end], SPEED.taxi);
+        setPhase(p, 'lineUp');
+      }
+      break;
+
+    case 'lineUp':
+      if (move(p, dt)) {
+        const r = RUNWAYS[p.depRunway];
+        const u = unitFrom(r.end, r.start);
+        const away = pt(r.start.x + u.x * 160, r.start.y + u.y * 160);
+        setPath(p, [r.end, CENTER, r.start, away], SPEED.roll);
+        setPhase(p, 'takeoff');
+      }
+      break;
+
+    case 'takeoff':
+      if (p.dist > p.lens[2]) {
+        p.speed = SPEED.air;
+        if (state.runways[p.depRunway] === p.id) state.runways[p.depRunway] = null;
+      }
+      if (move(p, dt)) setPhase(p, 'gone');
+      break;
+  }
+}
+
+// 沿著路線移動。要經過交叉點的話，在出發的地方先等，先等的先走
+function move(p, dt){
+  let next = p.dist + p.speed * dt;
+  // 🛣️ 要開上一段路之前，先看有沒有飛機對著開過來；有的話在路口先等，先等的先走
+  const k = enteringSegment(p, next);
+  const roadBlocked = k != null && !roadOK(p, k);
+  if (roadBlocked) next = p.lens[k];
+  // ✳️ 要經過交叉點的話，在出發的地方先等，先等的先走
+  if (!roadBlocked && p.zone && !p.crossed && state.center !== p.id && next >= p.waitAt) {
+    next = p.waitAt;
+    if (p.dist >= p.waitAt) {
+      if (p.centerSince == null) p.centerSince = state.clock;
+      if (centerTurn(p)) {
+        state.center = p.id;
+        next = p.dist + p.speed * dt;
+      }
+    }
+  }
+  p.dist = Math.min(next, total(p));
+  if (p.zone && state.center === p.id && p.dist > p.zone.end) {
+    state.center = null;
+    p.crossed = true;
+  }
+  if (p.roadRes && p.dist >= p.lens[p.roadRes.last + 1]) p.roadRes = null;
+  if (p.freeRunwayAt != null && p.dist >= p.lens[p.freeRunwayAt]) {
+    if (state.runways[p.arrRunway] === p.id) state.runways[p.arrRunway] = null;
+    p.freeRunwayAt = null;
+  }
+  place(p);
+  return p.dist >= total(p);
+}
+
+// 這一段是哪一條路？（滑行道 1、滑行道 2、左邊的路、中間連接道、右邊的路）
+function roadOf(a, b){
+  if (a.y === b.y && a.x !== b.x && (a.y === TAXI1_Y || a.y === TAXI2_Y)) return 'T' + a.y;
+  if (a.x === b.x && a.y !== b.y && Object.values(CONNECTORS).includes(a.x)) return 'V' + a.x;
+  return null;
+}
+
+// 這一步會不會開上新的一段路？會的話是第幾段
+function enteringSegment(p, next){
+  for (let k = 0; k < p.path.length - 1; k++) {
+    if (p.lens[k] < p.dist || p.lens[k] >= next) continue;
+    if (!roadOf(p.path[k], p.path[k + 1])) continue;
+    if (p.roadRes && p.roadRes.road === roadOf(p.path[k], p.path[k + 1]) && k <= p.roadRes.last) continue;
+    return k;
+  }
+  return null;
+}
+
+// 可以開上這段路嗎？有飛機對著開過來、或是有更早在等的飛機要對著開，就要等
+function roadOK(p, k){
+  const road = roadOf(p.path[k], p.path[k + 1]);
+  let e = k;
+  while (e + 2 < p.path.length && roadOf(p.path[e + 1], p.path[e + 2]) === road) e++;
+  const a = p.path[k], b = p.path[e + 1];
+  const from = road[0] === 'T' ? a.x : a.y, to = road[0] === 'T' ? b.x : b.y;
+  const req = { road, dir: Math.sign(to - from), lo: Math.min(from, to), hi: Math.max(from, to), last: e };
+  if (!p.roadWant || p.roadWant.road !== road) p.roadWant = { ...req, since: state.clock };
+  const clash = q => q.road === req.road && q.dir !== req.dir && q.lo < req.hi + 25 && req.lo < q.hi + 25;
+  const earlier = q => q.roadWant.since < p.roadWant.since || (q.roadWant.since === p.roadWant.since && q.id < p.id);
+  const blocked = state.planes.some(q => q !== p &&
+    ((q.roadRes && clash(q.roadRes)) || (q.roadWant && clash(q.roadWant) && earlier(q))));
+  if (blocked) return false;
+  p.roadRes = req;
+  p.roadWant = null;
+  return true;
+}
+
+// 交叉點沒人在用，而且沒有比它更早在等的飛機
+function centerTurn(p){
+  if (state.center) return false;
+  return !state.planes.some(q => q !== p && q.centerSince != null && !q.crossed &&
+                                  q.centerSince < p.centerSince);
+}
+
+// 跑道空了，先等的飛機先用（不管是要降落還是要起飛）
+function myTurn(p, r){
+  if (state.runways[r]) return false;
+  const since = q => q.phase === 'holding' ? q.arrTime : q.waitSince;
+  return !state.planes.some(q => q !== p && since(q) < since(p) &&
+    ((q.phase === 'holding' && q.arrRunway === r) || (q.phase === 'holdShort' && q.depRunway === r)));
+}
+
+function freeHoldSlot(){
+  const used = state.planes.filter(p => p.phase === 'holding').map(p => p.slot);
+  let s = 0;
+  while (used.includes(s)) s++;
+  return s % 8;
+}
+
+// ===== 航班表 =====
+const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'exitRunway', 'connWait', 'taxiIn'];
+const DEP_PHASES = ['parked', 'pushback', 'taxiWait', 'taxiOut', 'holdShort', 'lineUp', 'takeoff'];
+
+function renderTable(){
+  const rows = [];
+  for (const p of state.planes) {
+    if (ARR_PHASES.includes(p.phase)) rows.push({ p, dep: false, time: p.arrTime });
+    if (DEP_PHASES.includes(p.phase)) rows.push({ p, dep: true, time: p.depTime });
+  }
+  rows.sort((a, b) => a.time - b.time);
+
+  const cell = (p, field, text, canPick) => {
+    if (!canPick) return `<td>${text || '—'}</td>`;
+    const inner = text ? `<span class="filled">${text}</span>` : `<span class="empty">點我</span>`;
+    return `<td class="pick" onclick="openPicker(${p.id}, '${field}')">${inner}</td>`;
+  };
+  const num = n => n ? n + ' 號' : '';
+  const conn = c => c ? CONN_NAME[c] : '';
+
+  document.getElementById('table').innerHTML = `
+    <thead><tr><th>航班代碼</th><th>時間</th><th>跑道</th><th>停機坪</th><th>連接道</th></tr></thead>
+    <tbody>
+      ${rows.map(({ p, dep, time }) => {
+        if (dep) {
+          const early = ['parked', 'pushback', 'taxiWait'].includes(p.phase);
+          return `
+            <tr>
+              <td class="code dep">${p.code} 🛫</td>
+              <td>${fmtTime(time)}</td>
+              ${cell(p, 'depRunway', num(p.depRunway), early)}
+              <td class="none">—</td>
+              ${isTop(p.gate) ? cell(p, 'depConn', conn(p.depConn), early) : '<td class="none">—</td>'}
+            </tr>`;
+        }
+        const needsConn = p.gate && isTop(p.gate);
+        return `
+          <tr>
+            <td class="code arr">${p.code} 🛬</td>
+            <td>${fmtTime(time)}</td>
+            ${cell(p, 'arrRunway', num(p.arrRunway), p.phase === 'scheduled' || p.phase === 'holding')}
+            ${cell(p, 'gate', num(p.gate), p.phase !== 'taxiIn')}
+            ${needsConn ? cell(p, 'arrConn', conn(p.arrConn), p.phase !== 'taxiIn') : '<td class="none">—</td>'}
+          </tr>`;
+      }).join('')}
+    </tbody>
+  `;
+}
+
+// ===== 點格子 → 跳出選項 =====
+function openPicker(id, field){
+  const p = state.planes.find(q => q.id === id);
+  if (!p) return;
+  const option = (value, label, taken) =>
+    `<button class="opt ${p[field] === value ? 'chosen' : ''}" ${taken ? 'disabled' : ''}
+             onclick="choose(${p.id}, '${field}', ${JSON.stringify(value).replace(/"/g, "'")})">${label}</button>`;
+  // 已經有別的飛機的停機坪不能選
+  const gateOpt = g => option(g, g, state.gates[g] && state.gates[g] !== p.id);
+
+  let title, body;
+  if (field === 'gate') {
+    title = '選停機坪';
+    body = `
+      <h3>⬆️ 上面（要填連接道）</h3>
+      <div class="options">${[11,12,13,14,15,16,17,18,19,20].map(gateOpt).join('')}</div>
+      <h3>⬇️ 下面</h3>
+      <div class="options">${[1,2,3,4,5,6,7,8,9,10].map(gateOpt).join('')}</div>`;
+  } else if (field === 'arrConn' || field === 'depConn') {
+    title = '選連接道';
+    body = `<div class="options three">${['L', 'M', 'R'].map(c =>
+      option(c, c === 'M' ? '中間 ✳️' : CONN_NAME[c] + '邊')).join('')}</div>`;
+  } else {
+    title = '選跑道';
+    body = `<div class="options two">${[1, 2].map(n => option(n, n + ' 號跑道')).join('')}</div>`;
+  }
+
+  document.getElementById('picker').innerHTML = `
+    <div class="overlay" onclick="closePicker()">
+      <div class="picker" onclick="event.stopPropagation()">
+        <h2>${p.code}：${title}</h2>
+        ${body}
+        ${p[field] ? `<button class="cancel" onclick="choose(${p.id}, '${field}', null)">清除這格</button>` : ''}
+        <button class="cancel" onclick="closePicker()">取消</button>
+      </div>
+    </div>
+  `;
+}
+function closePicker(){ document.getElementById('picker').innerHTML = ''; }
+
+function choose(id, field, value){
+  const p = state.planes.find(q => q.id === id);
+  if (!p) return closePicker();
+  if (field === 'gate') {
+    if (value && state.gates[value] && state.gates[value] !== p.id) return;
+    if (p.gate) state.gates[p.gate] = null;
+    if (value) state.gates[value] = p.id;
+  }
+  p[field] = value;
+  state.dirty = true;
+  closePicker();
+}
+
+// ===== 機場地圖 =====
+function drawAirport(){
+  const road = (x1, y1, x2, y2, w) =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--asphalt)" stroke-width="${w}" stroke-linecap="round"/>`;
+  const rw = r => `<line x1="${r.start.x}" y1="${r.start.y}" x2="${r.end.x}" y2="${r.end.y}"
+                     stroke="var(--asphalt)" stroke-width="26" stroke-linecap="square"/>
+                   <line x1="${r.start.x}" y1="${r.start.y}" x2="${r.end.x}" y2="${r.end.y}"
+                     stroke="#fff" stroke-width="2" stroke-dasharray="14 12" opacity=".7"/>`;
+  const label = (x, y, text, size = 12, anchor = 'middle', color = '#cfd8e0') =>
+    `<text x="${x}" y="${y}" fill="${color}" font-size="${size}" font-weight="700" text-anchor="${anchor}">${text}</text>`;
+
+  let gates = '';
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    const x = gateX(g), y = gateY(g), ty = taxiY(g);
+    const top = isTop(g);
+    gates += road(x, ty, x, y, 10) +
+      `<rect x="${x - 16}" y="${y - 20}" width="32" height="40" rx="4"
+             fill="#22313f" stroke="#F0B90B" stroke-width="1.5" stroke-dasharray="4 3"/>` +
+      label(x, top ? y - 25 : y + 34, g, 13, 'middle', '#F0B90B');
+  }
+  const L = CONNECTORS.L, R = CONNECTORS.R, M = CONNECTORS.M;
+  return `
+    <rect x="0" y="0" width="600" height="58" fill="#123a5a"/>
+    ${label(590, 52, '☁️ 天空：等待降落的飛機在這裡繞圈圈', 11, 'end', '#7C93A8')}
+    ${road(L, TAXI2_Y, R, TAXI2_Y, 14)}
+    ${road(L, TAXI1_Y, R, TAXI1_Y, 14)}
+    ${road(L, TAXI2_Y, L, TAXI1_Y, 12)}
+    ${road(R, TAXI2_Y, R, TAXI1_Y, 12)}
+    ${road(M, TAXI2_Y, M, TAXI1_Y, 12)}
+    ${[1, 2].map(n => {
+      const r = RUNWAYS[n];
+      const side = s => s.x < 300 ? L : R;
+      return road(r.start.x, r.start.y, side(r.start), r.start.y, 10) +
+             road(r.end.x, r.end.y, side(r.end), r.end.y, 10) +
+             road(r.end.x, r.end.y, r.end.x, TAXI1_Y, 12);
+    }).join('')}
+    ${rw(RUNWAYS[1])}${rw(RUNWAYS[2])}
+    ${label(RUNWAYS[1].start.x + 45, RUNWAYS[1].start.y - 8, '1 號跑道', 14, 'middle', '#fff')}
+    ${label(RUNWAYS[2].start.x - 45, RUNWAYS[2].start.y - 8, '2 號跑道', 14, 'middle', '#fff')}
+    ${label(300, TAXI2_Y + 22, '滑行道 2')}
+    ${label(300, TAXI1_Y - 10, '滑行道 1')}
+    ${label(M + 8, 250, '中間連接道', 11, 'start')}
+    <text x="${L}" y="330" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(-90 ${L} 330)">左邊的路</text>
+    <text x="${R}" y="330" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(90 ${R} 330)">右邊的路</text>
+    ${gates}
+  `;
+}
+const AIRPORT = drawAirport();
+
+const PLANE_SHAPE = '14,0 4,-2 0,-12 -4,-12 -2,-2 -10,-2 -13,-6 -15,-6 -14,0 -15,6 -13,6 -10,2 -2,2 -4,12 0,12 4,2';
+
+function renderMap(){
+  const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
+    const dep = DEP_PHASES.includes(p.phase);
+    const color = dep ? 'var(--dep)' : 'var(--arr)';
+    const tug = p.phase === 'pushback'
+      ? `<text x="${p.x}" y="${p.y + (isTop(p.gate) ? -18 : 26)}" font-size="14" text-anchor="middle">🦀</text>` : '';
+    const small = p.phase === 'parked';
+    return `
+      <g>
+        <polygon points="${PLANE_SHAPE}" fill="${color}" stroke="#0B1929" stroke-width="1"
+                 transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>
+        <text x="${p.x}" y="${p.y + (small && isTop(p.gate) ? 26 : -15)}" fill="#fff" font-size="${small ? 8 : 11}" font-weight="700"
+              text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
+        ${tug}
+      </g>`;
+  }).join('');
+  document.getElementById('map').innerHTML = AIRPORT + planes;
+}
+
+// ===== 遊戲迴圈 =====
+let last = performance.now();
+function loop(now){
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  update(dt);
+  document.getElementById('clock').textContent = fmtTime(state.clock);
+  if (state.dirty) { renderTable(); state.dirty = false; }
+  renderMap();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
