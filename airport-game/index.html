@@ -628,11 +628,11 @@ function renderMap(){
   const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
-    // 螃蟹車：黃色、扁扁的長方形、很小，在機頭前面用一根桿子連著飛機
+    // 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的），在機頭前面用一根桿子連著飛機
     const tug = p.phase === 'pushback'
       ? `<g transform="translate(${p.x},${p.y}) rotate(${p.heading})">
-           <line x1="12" y1="0" x2="17" y2="0" stroke="#cfd8e0" stroke-width="1.5"/>
-           <rect x="17" y="-6" width="5" height="12" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"/>
+           <line x1="12" y1="0" x2="16" y2="0" stroke="#cfd8e0" stroke-width="1.5"/>
+           <rect x="16" y="-3" width="12" height="6" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"/>
          </g>` : '';
     const small = p.phase === 'parked' || p.phase === 'queued';
     const labelY = p.phase === 'parked' && isTop(p.gate) ? p.y + 24 : (p.phase === 'queued' ? p.y + 22 : p.y - 13);
