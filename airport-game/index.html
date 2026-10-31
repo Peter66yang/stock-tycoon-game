@@ -153,7 +153,7 @@
         👆 點黃色的「點我」來安排跑道和停機坪<br>
         🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
         ⬅️ 滑行道上大家都往左開，降落走右邊的路、起飛走左邊的路<br>
-        🦀 填好跑道、等待區有空位，螃蟹車才會把飛機推出來
+        🚜 填好跑道、等待區有空位，螃蟹車才會把飛機推出來
       </div>
     </div>
     <div class="right">
@@ -628,8 +628,12 @@ function renderMap(){
   const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
+    // 螃蟹車：黃色、扁扁的長方形、很小，在機頭前面用一根桿子連著飛機
     const tug = p.phase === 'pushback'
-      ? `<text x="${p.x}" y="${p.y + (isTop(p.gate) ? -16 : 24)}" font-size="13" text-anchor="middle">🦀</text>` : '';
+      ? `<g transform="translate(${p.x},${p.y}) rotate(${p.heading})">
+           <line x1="12" y1="0" x2="17" y2="0" stroke="#cfd8e0" stroke-width="1.5"/>
+           <rect x="17" y="-6" width="5" height="12" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"/>
+         </g>` : '';
     const small = p.phase === 'parked' || p.phase === 'queued';
     const labelY = p.phase === 'parked' && isTop(p.gate) ? p.y + 24 : (p.phase === 'queued' ? p.y + 22 : p.y - 13);
     return `
