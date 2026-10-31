@@ -195,7 +195,7 @@ function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
 function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
 
 const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
-const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'detach', 'taxiOut', 'queued'];
+const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'turning', 'detach', 'taxiOut', 'queued'];
 
 // ===== 遊戲狀態 =====
 const state = {
@@ -400,11 +400,23 @@ function step(p, dt){
       const t = tugs[p.gate];
       const n = noseOf(p);
       t.x = n.x; t.y = n.y; t.heading = p.heading;
-      if (done) {
-        // 🚜 推到滑行道了 → 跟飛機分開，自己開回停機坪旁邊
-        const g = p.gate, gx = gateX(g), home = tugHome(g);
+      if (done) setPhase(p, 'turning');
+      break;
+    }
+
+    case 'turning': {
+      // 🚜 在滑行道上把飛機轉成橫的、機頭朝左，螃蟹車也跟著轉到滑行道上
+      const target = isTop(p.gate) ? -180 : 180;
+      const turn = 45 * dt;
+      p.heading = p.heading < target ? Math.min(target, p.heading + turn) : Math.max(target, p.heading - turn);
+      const t = tugs[p.gate];
+      const n = noseOf(p);
+      t.x = n.x; t.y = n.y; t.heading = p.heading;
+      if (p.heading === target) {
+        // 轉好了 → 螃蟹車跟飛機分開，從飛機旁邊開回停機坪
+        const g = p.gate, gx = gateX(g), side = isTop(g) ? -1 : 1;
         t.mode = 'back';
-        t.path = [pt(gx, gateY(g)), home];
+        t.path = [pt(gx - 8, taxiY(g) + side * 18), pt(gx, taxiY(g) + side * 30), pt(gx, gateY(g)), tugHome(g)];
         state.gates[g] = null;
         p.detachAt = state.clock + 1;
         setPhase(p, 'detach');
@@ -554,7 +566,7 @@ function freeHoldSlot(){
 
 // ===== 航班表 =====
 const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'taxiIn'];
-const DEP_PHASES = ['parked', 'hookup', 'pushback', 'detach', 'taxiOut', 'queued', 'takeoff'];
+const DEP_PHASES = ['parked', 'hookup', 'pushback', 'turning', 'detach', 'taxiOut', 'queued', 'takeoff'];
 
 function renderTable(){
   const rows = [];
@@ -692,7 +704,7 @@ function renderMap(){
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
     // 螃蟹車接著飛機的時候，中間有一根桿子
-    const bar = p.phase === 'pushback'
+    const bar = p.phase === 'pushback' || p.phase === 'turning'
       ? `<line x1="12" y1="0" x2="16" y2="0" stroke="#cfd8e0" stroke-width="1.5"
               transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>` : '';
     const small = p.phase === 'parked' || p.phase === 'queued';
