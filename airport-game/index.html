@@ -195,7 +195,7 @@ function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
 function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
 
 const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
-const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'taxiOut', 'queued'];
+const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'detach', 'taxiOut', 'queued'];
 
 // ===== 遊戲狀態 =====
 const state = {
@@ -210,6 +210,39 @@ const state = {
 };
 for (let g = 1; g <= GATE_COUNT; g++) state.gates[g] = null;
 let nextId = 1;
+
+// ===== 螃蟹車：每個停機坪旁邊都有自己的一台 =====
+const TUG_SPEED = 25;
+const TUG_GAP = 22;  // 接在機頭前面多遠
+function tugHome(g){ return pt(gateX(g) + 21, gateY(g)); }
+const tugs = {};
+for (let g = 1; g <= GATE_COUNT; g++) {
+  const h = tugHome(g);
+  tugs[g] = { x: h.x, y: h.y, heading: isTop(g) ? -90 : 90, mode: 'home', path: null };
+}
+// 機頭前面的位置（螃蟹車要接在這裡）
+function noseOf(p){
+  const a = p.heading * Math.PI / 180;
+  return pt(p.x + Math.cos(a) * TUG_GAP, p.y + Math.sin(a) * TUG_GAP);
+}
+function moveTugs(dt){
+  for (const t of Object.values(tugs)) {
+    if (!t.path || !t.path.length) continue;
+    let step = TUG_SPEED * dt;
+    while (step > 0 && t.path.length) {
+      const goal = t.path[0];
+      const dx = goal.x - t.x, dy = goal.y - t.y, d = Math.hypot(dx, dy);
+      if (d > 0.01) t.heading = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (d <= step) { t.x = goal.x; t.y = goal.y; t.path.shift(); step -= d; }
+      else { t.x += dx / d * step; t.y += dy / d * step; step = 0; }
+    }
+    if (!t.path.length) {
+      t.path = null;
+      if (t.mode === 'back') t.mode = 'home';
+      if (t.mode === 'toPlane') t.mode = 'ready';
+    }
+  }
+}
 
 // 2 個英文字母 + 3 或 4 個數字
 function makeCode(){
@@ -280,6 +313,7 @@ function update(dt){
   }
 
   for (const p of state.planes) step(p, dt);
+  moveTugs(dt);
   state.planes = state.planes.filter(p => p.phase !== 'gone');
 }
 
@@ -343,15 +377,44 @@ function step(p, dt){
       const gx = gateX(p.gate), ty = taxiY(p.gate);
       if (lane.spots.length >= LANE_SIZE || somethingNear(p, gx, ty, 40)) break;
       lane.spots.push(p.id);
-      setPath(p, [pt(gx, gateY(p.gate)), pt(gx, ty)], SPEED.push, true);
-      setPhase(p, 'pushback');
+      // 🚜 螃蟹車從停機坪旁邊開到機頭前面
+      const t = tugs[p.gate];
+      t.mode = 'toPlane';
+      t.path = [noseOf(p)];
+      setPhase(p, 'hookup');
       break;
     }
 
-    case 'pushback':
-      if (move(p, dt)) {
-        state.gates[p.gate] = null;
-        // 在滑行道上往左開，走左邊的路去等待區
+    case 'hookup':
+      // 等螃蟹車接好
+      if (tugs[p.gate].mode === 'ready') {
+        const gx = gateX(p.gate);
+        tugs[p.gate].mode = 'attached';
+        setPath(p, [pt(gx, gateY(p.gate)), pt(gx, taxiY(p.gate))], SPEED.push, true);
+        setPhase(p, 'pushback');
+      }
+      break;
+
+    case 'pushback': {
+      const done = move(p, dt);
+      const t = tugs[p.gate];
+      const n = noseOf(p);
+      t.x = n.x; t.y = n.y; t.heading = p.heading;
+      if (done) {
+        // 🚜 推到滑行道了 → 跟飛機分開，自己開回停機坪旁邊
+        const g = p.gate, gx = gateX(g), home = tugHome(g);
+        t.mode = 'back';
+        t.path = [pt(gx, gateY(g)), home];
+        state.gates[g] = null;
+        p.detachAt = state.clock + 1;
+        setPhase(p, 'detach');
+      }
+      break;
+    }
+
+    case 'detach':
+      // 螃蟹車開走了，飛機才開去等待區
+      if (state.clock >= p.detachAt) {
         const r = RUNWAYS[p.depRunway];
         setPath(p, [pt(p.x, p.y), pt(LEFT_X, p.y), pt(LEFT_X, r.y), pt(LANE_IN, r.y)], SPEED.taxi);
         setPhase(p, 'taxiOut');
@@ -491,7 +554,7 @@ function freeHoldSlot(){
 
 // ===== 航班表 =====
 const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'taxiIn'];
-const DEP_PHASES = ['parked', 'pushback', 'taxiOut', 'queued', 'takeoff'];
+const DEP_PHASES = ['parked', 'hookup', 'pushback', 'detach', 'taxiOut', 'queued', 'takeoff'];
 
 function renderTable(){
   const rows = [];
@@ -628,12 +691,10 @@ function renderMap(){
   const planes = state.planes.filter(p => p.phase !== 'scheduled').map(p => {
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
-    // 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的），在機頭前面用一根桿子連著飛機
-    const tug = p.phase === 'pushback'
-      ? `<g transform="translate(${p.x},${p.y}) rotate(${p.heading})">
-           <line x1="12" y1="0" x2="16" y2="0" stroke="#cfd8e0" stroke-width="1.5"/>
-           <rect x="16" y="-3" width="12" height="6" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"/>
-         </g>` : '';
+    // 螃蟹車接著飛機的時候，中間有一根桿子
+    const bar = p.phase === 'pushback'
+      ? `<line x1="12" y1="0" x2="16" y2="0" stroke="#cfd8e0" stroke-width="1.5"
+              transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>` : '';
     const small = p.phase === 'parked' || p.phase === 'queued';
     const labelY = p.phase === 'parked' && isTop(p.gate) ? p.y + 24 : (p.phase === 'queued' ? p.y + 22 : p.y - 13);
     return `
@@ -642,10 +703,17 @@ function renderMap(){
                  transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>
         <text x="${p.x}" y="${labelY}" fill="#fff" font-size="${small ? 8 : 11}" font-weight="700"
               text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
-        ${tug}
+        ${bar}
       </g>`;
   }).join('');
-  document.getElementById('map').innerHTML = AIRPORT + planes;
+  document.getElementById('map').innerHTML = AIRPORT + planes + drawTugs();
+}
+
+// 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的）
+function drawTugs(){
+  return Object.values(tugs).map(t =>
+    `<rect x="-6" y="-3" width="12" height="6" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"
+           transform="translate(${t.x},${t.y}) rotate(${t.heading})"/>`).join('');
 }
 
 // ===== 遊戲迴圈 =====
