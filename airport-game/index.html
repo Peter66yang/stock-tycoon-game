@@ -499,7 +499,8 @@ function renderTable(){
     if (ARR_PHASES.includes(p.phase)) rows.push({ p, dep: false, time: p.arrTime });
     if (DEP_PHASES.includes(p.phase)) rows.push({ p, dep: true, time: p.depTime });
   }
-  rows.sort((a, b) => a.time - b.time);
+  // 要起飛的飛機排在最上面，玩家才不會漏掉；同一種的照時間排
+  rows.sort((a, b) => (b.dep - a.dep) || (a.time - b.time));
 
   const cell = (p, field, value, canPick) => {
     if (!canPick) return `<td>${value ? value + ' 號' : '—'}</td>`;
