@@ -196,7 +196,7 @@ function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
 function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
 
 const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
-const HOLD_SPEED = 20;  // 在天上繞圈圈的速度；設計師說飛去跑道降落也要用這個速度
+const HOLD_SPEED = 40;  // 在天上繞圈圈的速度（設計師選 40）；飛去跑道降落也用這個速度
 const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'detach', 'taxiOut', 'queued'];
 
 // ===== 遊戲狀態 =====
@@ -363,7 +363,7 @@ function step(p, dt){
 
     case 'holding': {
       // 在天上繞圈圈等
-      p.angle += dt * 1.2;
+      p.angle += dt * HOLD_SPEED / 16;  // 繞圈圈的圓大約一圈 100，用 HOLD_SPEED 的速度繞
       const cx = 60 + p.slot * 68, cy = 30;
       p.x = cx + Math.cos(p.angle) * 20;
       p.y = cy + Math.sin(p.angle) * 12;
