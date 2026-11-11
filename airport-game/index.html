@@ -406,7 +406,7 @@ function step(p, dt){
       if (state.clock < p.depTime || !p.depRunway) break;
       const lane = state.lanes[p.depRunway];
       const gx = gateX(p.gate), ty = taxiY(p.gate);
-      if (lane.spots.length >= LANE_SIZE || somethingNear(p, gx + pushR(p.gate) / 2, ty, 50)) break;
+      if (lane.spots.length >= LANE_SIZE || !pushZoneClear(p)) break;
       lane.spots.push(p.id);
       // 🚜 螃蟹車從停機坪旁邊開到機頭前面
       const t = tugs[p.gate];
@@ -509,8 +509,8 @@ function move(p, dt){
   // 🛣️ 要開上左邊或右邊的路之前，先看有沒有飛機對著開過來；有的話在路口先等，先等的先走
   const k = enteringSegment(p, next);
   if (k != null && !roadOK(p, k)) next = p.lens[k];
-  // 🚗 前面有飛機就停下來，保持距離
-  if (GROUND.includes(p.phase) && next > p.dist) {
+  // 🚗 前面有飛機就停下來，保持距離（被螃蟹車推的飛機不用停，別人要讓它）
+  if (GROUND.includes(p.phase) && p.phase !== 'pushback' && next > p.dist) {
     const q = posAt(p, next);
     if (blockedAhead(p, q.x, q.y)) next = p.dist;
   }
@@ -529,12 +529,25 @@ function blockedAhead(p, nx, ny){
   const dx = nx - p.x, dy = ny - p.y;
   const len = Math.hypot(dx, dy);
   if (!len) return false;
-  return state.planes.some(q => {
-    if (q === p || !GROUND.includes(q.phase)) return false;
-    const vx = q.x - p.x, vy = q.y - p.y;
+  const inFront = (x, y) => {
+    const vx = x - p.x, vy = y - p.y;
     const d = Math.hypot(vx, vy);
     return d < 28 && (vx * dx + vy * dy) / len > 0.7 * d;
+  };
+  return state.planes.some(q => {
+    if (q === p || !GROUND.includes(q.phase)) return false;
+    if (inFront(q.x, q.y)) return true;
+    // 正在被推出來的飛機：也要讓出它等一下會停的地方
+    if (q.phase === 'pushback') { const e = q.path[q.path.length - 1]; return inFront(e.x, e.y); }
+    return false;
   });
+}
+
+// 螃蟹車要推的那一段滑行道上沒有飛機，才可以開始推
+function pushZoneClear(p){
+  const gx = gateX(p.gate), ty = taxiY(p.gate), R = pushR(p.gate);
+  return !state.planes.some(q => q !== p && GROUND.includes(q.phase) &&
+    Math.abs(q.y - ty) < 20 && q.x > gx - 20 && q.x < gx + R + 45);
 }
 function somethingNear(p, x, y, r){
   return state.planes.some(q => q !== p && GROUND.includes(q.phase) && Math.hypot(q.x - x, q.y - y) < r);
