@@ -828,9 +828,13 @@ function renderMap(){
 function drawBridges(){
   let out = '';
   for (let g = 1; g <= GATE_COUNT; g++) {
-    const side = isTop(g) ? -1 : 1;
-    const ax = gateX(g) - 13, ay = terminalEdge(g);              // 空橋從大廳這裡出來
-    const dx = gateX(g) - 2.5, dy = gateY(g) + side * 7;          // 飛機機頭旁邊的門
+    // 空橋只能接在飛機的「左邊」（用飛機自己的方向來看）
+    // 上面的飛機機頭朝上，左邊是畫面的左邊；下面的飛機機頭朝下，左邊是畫面的右邊
+    const h = (isTop(g) ? -90 : 90) * Math.PI / 180;
+    const door = { x: 7, y: -2.5 };                               // 機頭旁邊、飛機左邊的門
+    const dx = gateX(g) + door.x * Math.cos(h) - door.y * Math.sin(h);
+    const dy = gateY(g) + door.x * Math.sin(h) + door.y * Math.cos(h);
+    const ax = gateX(g) + (dx > gateX(g) ? 13 : -13), ay = terminalEdge(g);  // 空橋從大廳這裡出來
     const ext = 0.25 + 0.75 * bridges[g];                         // 縮回來的時候只剩一小段
     const ex = ax + (dx - ax) * ext, ey = ay + (dy - ay) * ext;
     out += `<line x1="${ax}" y1="${ay}" x2="${ex}" y2="${ey}" stroke="#5c6b78" stroke-width="7" stroke-linecap="round"/>
