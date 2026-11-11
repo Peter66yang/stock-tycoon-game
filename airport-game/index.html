@@ -824,15 +824,17 @@ function renderMap(){
   document.getElementById('map').innerHTML = AIRPORT + drawBridges() + planes + drawTugs();
 }
 
-// 空橋：從大廳伸出去，接到飛機機頭旁邊的門
+// 空橋：從大廳斜斜地伸出去，接到飛機機頭旁邊的門
 function drawBridges(){
   let out = '';
   for (let g = 1; g <= GATE_COUNT; g++) {
-    const x = gateX(g) - 9, edge = terminalEdge(g);
-    const reach = Math.abs(edge - gateY(g)) - 10;   // 伸到最長，剛好接到機頭旁邊
-    const len = 5 + (reach - 5) * bridges[g];
-    const y = isTop(g) ? edge : edge - len;
-    out += `<rect x="${x - 3}" y="${y}" width="6" height="${len}" rx="1.5" fill="#c9d3dc" stroke="#5c6b78" stroke-width="0.8"/>`;
+    const side = isTop(g) ? -1 : 1;
+    const ax = gateX(g) - 13, ay = terminalEdge(g);              // 空橋從大廳這裡出來
+    const dx = gateX(g) - 2.5, dy = gateY(g) + side * 7;          // 飛機機頭旁邊的門
+    const ext = 0.25 + 0.75 * bridges[g];                         // 縮回來的時候只剩一小段
+    const ex = ax + (dx - ax) * ext, ey = ay + (dy - ay) * ext;
+    out += `<line x1="${ax}" y1="${ay}" x2="${ex}" y2="${ey}" stroke="#5c6b78" stroke-width="7" stroke-linecap="round"/>
+            <line x1="${ax}" y1="${ay}" x2="${ex}" y2="${ey}" stroke="#c9d3dc" stroke-width="5" stroke-linecap="round"/>`;
   }
   return out;
 }
