@@ -242,7 +242,8 @@ function noseOf(p){
 
 // 螃蟹車接在機頭的接頭上，像露營車拖拖車一樣，中間會折一個角度
 const HITCH = 12;      // 接頭在機頭（飛機中心往前多遠）
-const BEND_MAX = 35;   // 轉彎時最多折幾度
+const BEND_MAX = 60;   // 轉彎時最多折幾度（設計師說要折多一點）
+const BEND_START = 0.45;  // 轉彎轉到多少才開始折（設計師說快到滑行道才折）
 function hitchTug(p, t, bend){
   const a = p.heading * Math.PI / 180;
   const hx = p.x + Math.cos(a) * HITCH, hy = p.y + Math.sin(a) * HITCH;
@@ -424,9 +425,10 @@ function step(p, dt){
     case 'pushback': {
       const done = move(p, dt);
       const t = tugs[p.gate];
-      // 轉彎的時候螃蟹車先轉、折出角度；彎的中間折最多，頭尾變回一直線
+      // 快到滑行道的時候螃蟹車才開始折出角度，折到最多以後，最後變回一直線
       const arcStart = p.lens[1], arcLen = total(p) - arcStart;
-      const k = Math.max(0, Math.min(1, (p.dist - arcStart) / arcLen));
+      const k0 = Math.max(0, Math.min(1, (p.dist - arcStart) / arcLen));
+      const k = Math.max(0, (k0 - BEND_START) / (1 - BEND_START));
       const side = isTop(p.gate) ? -1 : 1;
       // 設計師決定：開口朝右（螃蟹車往轉彎的內側折）
       hitchTug(p, t, -side * BEND_MAX * Math.sin(Math.PI * k));
