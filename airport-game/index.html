@@ -223,14 +223,16 @@ for (let g = 1; g <= GATE_COUNT; g++) {
 }
 // 螃蟹車推飛機的路線：先直直往後推，再轉一個彎上到滑行道，最後機頭朝左
 const ARC_STEPS = 60;  // 圓弧切成很多小段，轉起來才會順
-const PUSH_R = 50;  // 轉彎的圓有多大（設計師說要大一點、看得清楚）
+// 設計師說：一推出來就直接轉彎，不要先直直推一段
+// 所以轉彎的圓剛好從停機坪開始、到滑行道結束
+function pushR(g){ return Math.abs(gateY(g) - taxiY(g)); }
 function pushbackPath(g){
-  const gx = gateX(g), ty = taxiY(g), side = isTop(g) ? -1 : 1;
-  const cx = gx + PUSH_R, cy = ty + side * PUSH_R;  // 轉彎的圓心
-  const pts = [pt(gx, gateY(g))];
+  const gx = gateX(g), ty = taxiY(g), side = isTop(g) ? -1 : 1, R = pushR(g);
+  const cx = gx + R, cy = ty + side * R;  // 轉彎的圓心
+  const pts = [];
   for (let i = 0; i <= ARC_STEPS; i++) {
     const a = Math.PI + side * (Math.PI / 2) * (i / ARC_STEPS);
-    pts.push(pt(cx + Math.cos(a) * PUSH_R, cy + Math.sin(a) * PUSH_R));
+    pts.push(pt(cx + Math.cos(a) * R, cy + Math.sin(a) * R));
   }
   return pts;
 }
@@ -404,7 +406,7 @@ function step(p, dt){
       if (state.clock < p.depTime || !p.depRunway) break;
       const lane = state.lanes[p.depRunway];
       const gx = gateX(p.gate), ty = taxiY(p.gate);
-      if (lane.spots.length >= LANE_SIZE || somethingNear(p, gx + PUSH_R / 2, ty, 45)) break;
+      if (lane.spots.length >= LANE_SIZE || somethingNear(p, gx + pushR(p.gate) / 2, ty, 50)) break;
       lane.spots.push(p.id);
       // 🚜 螃蟹車從停機坪旁邊開到機頭前面
       const t = tugs[p.gate];
@@ -432,7 +434,7 @@ function step(p, dt){
       const done = move(p, dt);
       const t = tugs[p.gate];
       // 快到滑行道的時候螃蟹車才開始折出角度，折到最多以後，最後變回一直線
-      const arcStart = p.lens[1], arcLen = total(p) - arcStart;
+      const arcStart = 0, arcLen = total(p);
       const k0 = Math.max(0, Math.min(1, (p.dist - arcStart) / arcLen));
       const k = Math.max(0, (k0 - BEND_START) / (1 - BEND_START));
       const side = isTop(p.gate) ? -1 : 1;
