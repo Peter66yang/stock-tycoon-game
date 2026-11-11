@@ -453,6 +453,7 @@ function step(p, dt){
         const diff = ((p.heading - t.heading) % 180 + 270) % 180 - 90;
         if (Math.abs(diff) > 120 * dt) { t.heading += Math.sign(diff) * 120 * dt; break; }
         t.heading = p.heading;
+        if (!pushZoneClear(p)) break;  // 要推之前再看一次：滑行道上有飛機就先等
         tugs[p.gate].mode = 'attached';
         setPath(p, pushbackPath(p.gate), SPEED.push, true);
         setPhase(p, 'pushback');
