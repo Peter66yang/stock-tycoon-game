@@ -239,6 +239,19 @@ function noseOf(p){
   const a = p.heading * Math.PI / 180;
   return pt(p.x + Math.cos(a) * TUG_GAP, p.y + Math.sin(a) * TUG_GAP);
 }
+
+// 螃蟹車接在機頭的接頭上，像露營車拖拖車一樣，中間會折一個角度
+const HITCH = 12;      // 接頭在機頭（飛機中心往前多遠）
+const BEND_MAX = 35;   // 轉彎時最多折幾度
+function hitchTug(p, t, bend){
+  const a = p.heading * Math.PI / 180;
+  const hx = p.x + Math.cos(a) * HITCH, hy = p.y + Math.sin(a) * HITCH;
+  const b = (p.heading + bend) * Math.PI / 180;
+  t.heading = p.heading + bend;
+  t.x = hx + Math.cos(b) * (TUG_GAP - HITCH);
+  t.y = hy + Math.sin(b) * (TUG_GAP - HITCH);
+  t.bar = [hx, hy, hx + Math.cos(b) * 4, hy + Math.sin(b) * 4];
+}
 function moveTugs(dt){
   for (const t of Object.values(tugs)) {
     if (!t.path || !t.path.length) continue;
@@ -411,12 +424,16 @@ function step(p, dt){
     case 'pushback': {
       const done = move(p, dt);
       const t = tugs[p.gate];
-      const n = noseOf(p);
-      t.x = n.x; t.y = n.y; t.heading = p.heading;
+      // 轉彎的時候螃蟹車先轉、折出角度；彎的中間折最多，頭尾變回一直線
+      const arcStart = p.lens[1], arcLen = total(p) - arcStart;
+      const k = Math.max(0, Math.min(1, (p.dist - arcStart) / arcLen));
+      const side = isTop(p.gate) ? -1 : 1;
+      hitchTug(p, t, side * BEND_MAX * Math.sin(Math.PI * k));
       if (done) {
         // 推到滑行道、轉好方向了 → 螃蟹車跟飛機分開，從飛機旁邊開回停機坪
         const g = p.gate, gx = gateX(g), side = isTop(g) ? -1 : 1;
         t.mode = 'back';
+        t.bar = null;
         t.path = [pt(gx, taxiY(g) + side * 20), pt(gx, gateY(g)), tugHome(g)];
         state.gates[g] = null;
         p.detachAt = state.clock + 1;
@@ -708,9 +725,6 @@ function renderMap(){
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
     // 螃蟹車接著飛機的時候，中間有一根桿子
-    const bar = p.phase === 'pushback'
-      ? `<line x1="12" y1="0" x2="16" y2="0" stroke="#cfd8e0" stroke-width="1.5"
-              transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>` : '';
     const small = p.phase === 'parked' || p.phase === 'queued';
     const labelY = p.phase === 'parked' && isTop(p.gate) ? p.y + 24 : (p.phase === 'queued' ? p.y + 22 : p.y - 13);
     return `
@@ -719,7 +733,6 @@ function renderMap(){
                  transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>
         <text x="${p.x}" y="${labelY}" fill="#fff" font-size="${small ? 8 : 11}" font-weight="700"
               text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
-        ${bar}
       </g>`;
   }).join('');
   document.getElementById('map').innerHTML = AIRPORT + planes + drawTugs();
@@ -728,6 +741,9 @@ function renderMap(){
 // 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的）
 function drawTugs(){
   return Object.values(tugs).map(t =>
+    (t.mode === 'attached' && t.bar
+      ? `<line x1="${t.bar[0]}" y1="${t.bar[1]}" x2="${t.bar[2]}" y2="${t.bar[3]}" stroke="#cfd8e0" stroke-width="1.5"/>
+         <circle cx="${t.bar[0]}" cy="${t.bar[1]}" r="1.3" fill="#cfd8e0"/>` : '') +
     `<rect x="-6" y="-3" width="12" height="6" rx="1.5" fill="#F0B90B" stroke="#0B1929" stroke-width="0.8"
            transform="translate(${t.x},${t.y}) rotate(${t.heading})"/>`).join('');
 }
