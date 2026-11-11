@@ -151,6 +151,7 @@
       <div class="board"><table id="table"></table></div>
       <div class="hint">
         👆 點黃色的「點我」來安排跑道和停機坪<br>
+        🅿️ 跑道和停機坪<b>都填好</b>，飛機才會降落<br>
         🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
         ⬅️ 滑行道上大家都往左開，降落走右邊的路、起飛走左邊的路<br>
         🚜 填好跑道、跑道頭前面的隊伍還有空位（最多 5 架），螃蟹車才會把飛機推出來
@@ -365,8 +366,9 @@ function step(p, dt){
       p.loopS = (p.loopS + HOLD_SPEED * dt) % LOOP_LEN;
       const lp = loopPos(p.loopS);
       p.x = lp.x; p.y = lp.y; p.heading = lp.heading;
-      // 有填跑道、輪到它用跑道 → 從左邊飛進來降落
-      if (p.arrRunway && myTurn(p, p.arrRunway)) {
+      // 跑道和停機坪都填好了、輪到它用跑道 → 從左邊飛進來降落
+      // （設計師的規則：沒有填停機坪就不准降落，才不會卡在跑道上變成死結）
+      if (p.arrRunway && p.gate && myTurn(p, p.arrRunway)) {
         const r = RUNWAYS[p.arrRunway];
         state.runways[p.arrRunway] = p.id;
         setPath(p, [pt(p.x, p.y), pt(r.start.x - 140, r.y - 25), r.start, r.end], HOLD_SPEED);
@@ -591,7 +593,7 @@ function roadOK(p, k){
 function myTurn(p, r){
   if (state.runways[r]) return false;
   const since = q => q.phase === 'holding' ? q.arrTime : q.frontSince;
-  const waiting = q => (q.phase === 'holding' && q.arrRunway === r) ||
+  const waiting = q => (q.phase === 'holding' && q.arrRunway === r && q.gate) ||
     (q.phase === 'queued' && q.depRunway === r && q.frontSince != null);
   return !state.planes.some(q => q !== p && waiting(q) && since(q) < since(p));
 }
@@ -694,7 +696,8 @@ function openPicker(id, field){
       <div class="picker" onclick="event.stopPropagation()">
         <h2>${p.code}：${title}</h2>
         ${body}
-        ${p[field] ? `<button class="cancel" onclick="choose(${p.id}, '${field}', null)">清除這格</button>` : ''}
+        ${p[field] && (field !== 'gate' || p.phase === 'scheduled' || p.phase === 'holding')
+          ? `<button class="cancel" onclick="choose(${p.id}, '${field}', null)">清除這格</button>` : ''}
         <button class="cancel" onclick="closePicker()">取消</button>
       </div>
     </div>
