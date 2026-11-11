@@ -153,7 +153,7 @@
         👆 點黃色的「點我」來安排跑道和停機坪<br>
         🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
         ⬅️ 滑行道上大家都往左開，降落走右邊的路、起飛走左邊的路<br>
-        🚜 填好跑道、等待區有空位，螃蟹車才會把飛機推出來
+        🚜 填好跑道、跑道頭前面的隊伍還有空位（最多 5 架），螃蟹車才會把飛機推出來
       </div>
     </div>
     <div class="right">
@@ -170,7 +170,7 @@ const ARRIVAL_EVERY = 15;          // 每 15 秒來一架新飛機
 const PARK_MIN = 15;               // 試玩：停機坪停 15 秒（原本 3～7 分鐘）
 const PARK_MAX = 15;
 const GATE_COUNT = 20;             // 20 個停機坪：1～10 在下面、11～20 在上面
-const LANE_SIZE = 5;               // 每個等待區可以停 5 架
+const LANE_SIZE = 5;               // 每條跑道前面最多排 5 架
 const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛機
 
 // ===== 機場地圖的位置 =====
@@ -183,11 +183,12 @@ const TAXI2_Y = 150;  // 上面的滑行道 2
 const TAXI1_Y = 510;  // 下面的滑行道 1
 const TOP_GATE_Y = 95;
 const BOT_GATE_Y = 575;
-const LEFT_X = 30;    // 左邊的路：去等待區起飛
+const LEFT_X = 30;    // 左邊的路：去跑道頭排隊起飛
 const RIGHT_X = 570;  // 右邊的路：降落完開出來
 const EXIT_X = 545;   // 降落完在這裡先看右邊的路能不能走
-const LANE_IN = 50;   // 等待區入口
-const LANE_FRONT = 182;  // 等待區最前面（緊鄰跑道頭）
+const LANE_IN = 50;   // 排隊的滑行道入口
+const LANE_FRONT = 182;  // 排隊最前面那架停在這裡（停止線前面）
+const STOP_X = 192;      // 停止線
 const LANE_GAP = 30;
 function isTop(g){ return g > 10; }
 function gateX(g){ return 110 + ((g - 1) % 10) * 42; }
@@ -204,7 +205,7 @@ const state = {
   planes: [],
   runways: { 1: null, 2: null },  // 現在誰在用這條跑道
   gates: {},                      // 每個停機坪被誰用
-  lanes: { 1: { spots: [], queue: [] }, 2: { spots: [], queue: [] } },  // 等待區：誰有位子、誰已經在排隊
+  lanes: { 1: { spots: [], queue: [] }, 2: { spots: [], queue: [] } },  // 跑道頭前面排隊：誰有位子、誰已經在排隊
   usedCodes: new Set(),
   dirty: true,
 };
@@ -384,7 +385,7 @@ function step(p, dt){
       break;
 
     case 'parked': {
-      // 時間到、填好跑道、等待區也有空位，螃蟹車才把飛機推出來
+      // 時間到、填好跑道、隊伍也還有空位，螃蟹車才把飛機推出來
       if (state.clock < p.depTime || !p.depRunway) break;
       const lane = state.lanes[p.depRunway];
       const gx = gateX(p.gate), ty = taxiY(p.gate);
@@ -425,7 +426,7 @@ function step(p, dt){
     }
 
     case 'detach':
-      // 螃蟹車開走了，飛機才開去等待區
+      // 螃蟹車開走了，飛機才開去跑道頭排隊
       if (state.clock >= p.detachAt) {
         const r = RUNWAYS[p.depRunway];
         setPath(p, [pt(p.x, p.y), pt(LEFT_X, p.y), pt(LEFT_X, r.y), pt(LANE_IN, r.y)], SPEED.taxi);
@@ -441,7 +442,7 @@ function step(p, dt){
       break;
 
     case 'queued': {
-      // 在等待區排隊，前面的走了就往前開
+      // 在跑道頭前面的滑行道上排隊，前面的走了就往前開
       const lane = state.lanes[p.depRunway];
       const idx = lane.queue.indexOf(p.id);
       const target = LANE_FRONT - idx * LANE_GAP;
@@ -670,11 +671,14 @@ function drawAirport(){
   const runways = [1, 2].map(n => {
     const r = RUNWAYS[n];
     return road(r.end.x, r.y, RIGHT_X, r.y, 10) +
-      road(LEFT_X, r.y, LANE_IN, r.y, 10) +
-      // 等待區
-      `<rect x="${LANE_IN - 4}" y="${r.y - 13}" width="${LANE_FRONT - LANE_IN + 22}" height="26" rx="5"
-             fill="#26333f" stroke="#F0B90B" stroke-width="1.2" stroke-dasharray="5 4"/>` +
-      label((LANE_IN + LANE_FRONT) / 2 + 6, r.y - 18, `${n} 號跑道等待區（5 架）`, 10, 'middle', '#F0B90B') +
+      // 通往跑道頭的滑行道：要起飛的飛機在這裡排隊（最多 5 架）
+      road(LEFT_X, r.y, r.start.x, r.y, 14) +
+      // 停止線：黃色的兩條實線加兩條虛線，等塔台說可以才進跑道
+      `<line x1="${STOP_X - 2}" y1="${r.y - 8}" x2="${STOP_X - 2}" y2="${r.y + 8}" stroke="#F0B90B" stroke-width="1.2"/>
+       <line x1="${STOP_X + 1}" y1="${r.y - 8}" x2="${STOP_X + 1}" y2="${r.y + 8}" stroke="#F0B90B" stroke-width="1.2"/>
+       <line x1="${STOP_X + 4}" y1="${r.y - 8}" x2="${STOP_X + 4}" y2="${r.y + 8}" stroke="#F0B90B" stroke-width="1.2" stroke-dasharray="2 2"/>
+       <line x1="${STOP_X + 7}" y1="${r.y - 8}" x2="${STOP_X + 7}" y2="${r.y + 8}" stroke="#F0B90B" stroke-width="1.2" stroke-dasharray="2 2"/>` +
+      label(STOP_X + 6, r.y - 12, '停止線', 9, 'end', '#F0B90B') +
       // 跑道
       `<rect x="${r.start.x}" y="${r.y - 14}" width="${r.end.x - r.start.x}" height="28" fill="var(--asphalt)"/>
        <line x1="${r.start.x + 10}" y1="${r.y}" x2="${r.end.x - 10}" y2="${r.y}" stroke="#fff" stroke-width="2" stroke-dasharray="14 12" opacity=".7"/>` +
