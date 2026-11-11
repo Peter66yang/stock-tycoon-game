@@ -222,13 +222,13 @@ for (let g = 1; g <= GATE_COUNT; g++) {
   tugs[g] = { x: h.x, y: h.y, heading: isTop(g) ? -90 : 90, mode: 'home', path: null };
 }
 // 螃蟹車推飛機的路線：先直直往後推，再轉一個彎上到滑行道，最後機頭朝左
-const PUSH_R = 30;
+const PUSH_R = 50;  // 轉彎的圓有多大（設計師說要大一點、看得清楚）
 function pushbackPath(g){
   const gx = gateX(g), ty = taxiY(g), side = isTop(g) ? -1 : 1;
   const cx = gx + PUSH_R, cy = ty + side * PUSH_R;  // 轉彎的圓心
   const pts = [pt(gx, gateY(g))];
-  for (let i = 0; i <= 8; i++) {
-    const a = Math.PI + side * (Math.PI / 2) * (i / 8);
+  for (let i = 0; i <= 12; i++) {
+    const a = Math.PI + side * (Math.PI / 2) * (i / 12);
     pts.push(pt(cx + Math.cos(a) * PUSH_R, cy + Math.sin(a) * PUSH_R));
   }
   return pts;
