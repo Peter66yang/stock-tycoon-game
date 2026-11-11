@@ -356,18 +356,15 @@ function step(p, dt){
     case 'scheduled':
       if (state.clock >= p.arrTime) {
         setPhase(p, 'holding');
-        p.slot = freeHoldSlot();
-        p.angle = 0;
+        p.loopS = freeLoopSpot();
       }
       break;
 
     case 'holding': {
-      // 在天上繞圈圈等
-      p.angle += dt * HOLD_SPEED / 16;  // 繞圈圈的圓大約一圈 100，用 HOLD_SPEED 的速度繞
-      const cx = 60 + p.slot * 68, cy = 30;
-      p.x = cx + Math.cos(p.angle) * 20;
-      p.y = cy + Math.sin(p.angle) * 12;
-      p.heading = p.angle * 180 / Math.PI + 90;
+      // 在藍色天空裡，沿著操場形的路線一架跟著一架飛
+      p.loopS = (p.loopS + HOLD_SPEED * dt) % LOOP_LEN;
+      const lp = loopPos(p.loopS);
+      p.x = lp.x; p.y = lp.y; p.heading = lp.heading;
       // 有填跑道、輪到它用跑道 → 從左邊飛進來降落
       if (p.arrRunway && myTurn(p, p.arrRunway)) {
         const r = RUNWAYS[p.arrRunway];
@@ -599,11 +596,35 @@ function myTurn(p, r){
   return !state.planes.some(q => q !== p && waiting(q) && since(q) < since(p));
 }
 
-function freeHoldSlot(){
-  const used = state.planes.filter(p => p.phase === 'holding').map(p => p.slot);
-  let s = 0;
-  while (used.includes(s)) s++;
-  return s % 8;
+// ===== 天上等待的路線：像操場一樣（上面往右飛、下面往左飛，兩頭是半圓）=====
+const LOOP = { x1: 70, x2: 470, cy: 37, r: 14 };
+const LOOP_STRAIGHT = LOOP.x2 - LOOP.x1;
+const LOOP_LEN = 2 * LOOP_STRAIGHT + 2 * Math.PI * LOOP.r;
+function loopPos(s){
+  const { x1, x2, cy, r } = LOOP, half = Math.PI * r;
+  if (s < LOOP_STRAIGHT) return { x: x1 + s, y: cy - r, heading: 0 };          // 上面往右
+  s -= LOOP_STRAIGHT;
+  if (s < half) {                                                                // 右邊的半圓
+    const a = -Math.PI / 2 + s / r;
+    return { x: x2 + Math.cos(a) * r, y: cy + Math.sin(a) * r, heading: a * 180 / Math.PI + 90 };
+  }
+  s -= half;
+  if (s < LOOP_STRAIGHT) return { x: x2 - s, y: cy + r, heading: 180 };        // 下面往左
+  s -= LOOP_STRAIGHT;
+  const a = Math.PI / 2 + s / r;                                                 // 左邊的半圓
+  return { x: x1 + Math.cos(a) * r, y: cy + Math.sin(a) * r, heading: a * 180 / Math.PI + 90 };
+}
+// 新來的飛機，排在離其他等待的飛機最遠的地方，大家才會保持距離
+function freeLoopSpot(){
+  const used = state.planes.filter(p => p.phase === 'holding' && p.loopS != null).map(p => p.loopS);
+  if (!used.length) return 0;
+  let best = 0, bestGap = -1;
+  for (let i = 0; i < 96; i++) {
+    const s = LOOP_LEN * i / 96;
+    const gap = Math.min(...used.map(u => { const d = Math.abs(u - s); return Math.min(d, LOOP_LEN - d); }));
+    if (gap > bestGap) { bestGap = gap; best = s; }
+  }
+  return best;
 }
 
 // ===== 航班表 =====
@@ -727,7 +748,7 @@ function drawAirport(){
   }).join('');
   return `
     <rect x="0" y="0" width="600" height="58" fill="#123a5a"/>
-    ${label(590, 52, '☁️ 天空：等待降落的飛機在這裡繞圈圈', 11, 'end', '#7C93A8')}
+    ${label(592, 52, '☁️ 等待降落', 11, 'end', '#7C93A8')}
     ${road(LEFT_X, TAXI2_Y, RIGHT_X, TAXI2_Y, 14)}
     ${road(LEFT_X, TAXI1_Y, RIGHT_X, TAXI1_Y, 14)}
     ${road(LEFT_X, TAXI2_Y, LEFT_X, TAXI1_Y, 12)}
