@@ -196,6 +196,7 @@ function gateY(g){ return isTop(g) ? TOP_GATE_Y : BOT_GATE_Y; }
 function taxiY(g){ return isTop(g) ? TAXI2_Y : TAXI1_Y; }
 
 const SPEED = { air: 90, roll: 70, taxi: 35, push: 12 };
+const HOLD_SPEED = 20;  // 在天上繞圈圈的速度；設計師說飛去跑道降落也要用這個速度
 const GROUND = ['exitRunway', 'taxiIn', 'pushback', 'detach', 'taxiOut', 'queued'];
 
 // ===== 遊戲狀態 =====
@@ -371,14 +372,13 @@ function step(p, dt){
       if (p.arrRunway && myTurn(p, p.arrRunway)) {
         const r = RUNWAYS[p.arrRunway];
         state.runways[p.arrRunway] = p.id;
-        setPath(p, [pt(p.x, p.y), pt(r.start.x - 140, r.y - 25), r.start, r.end], SPEED.air);
+        setPath(p, [pt(p.x, p.y), pt(r.start.x - 140, r.y - 25), r.start, r.end], HOLD_SPEED);
         setPhase(p, 'landing');
       }
       break;
     }
 
     case 'landing':
-      if (p.dist > p.lens[2]) p.speed = SPEED.roll;  // 碰到跑道就慢下來
       if (move(p, dt)) setPhase(p, 'runwayWait');
       break;
 
