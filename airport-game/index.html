@@ -428,7 +428,8 @@ function step(p, dt){
       const arcStart = p.lens[1], arcLen = total(p) - arcStart;
       const k = Math.max(0, Math.min(1, (p.dist - arcStart) / arcLen));
       const side = isTop(p.gate) ? -1 : 1;
-      hitchTug(p, t, side * BEND_MAX * Math.sin(Math.PI * k));
+      // 設計師決定：開口朝右（螃蟹車往轉彎的內側折）
+      hitchTug(p, t, -side * BEND_MAX * Math.sin(Math.PI * k));
       if (done) {
         // 推到滑行道、轉好方向了 → 螃蟹車跟飛機分開，從飛機旁邊開回停機坪
         const g = p.gate, gx = gateX(g), side = isTop(g) ? -1 : 1;
