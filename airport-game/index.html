@@ -158,7 +158,7 @@
       </div>
     </div>
     <div class="right">
-      <svg id="map" viewBox="0 0 600 640"></svg>
+      <svg id="map" viewBox="0 0 600 680"></svg>
     </div>
   </div>
 </div>
@@ -177,13 +177,16 @@ const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛
 // ===== 機場地圖的位置 =====
 // 兩條跑道橫的、平行，從左邊往右邊降落和起飛
 const RUNWAYS = {
-  1: { y: 255, start: { x: 200, y: 255 }, end: { x: 520, y: 255 } },
-  2: { y: 405, start: { x: 200, y: 405 }, end: { x: 520, y: 405 } },
+  1: { y: 285, start: { x: 200, y: 285 }, end: { x: 520, y: 285 } },
+  2: { y: 435, start: { x: 200, y: 435 }, end: { x: 520, y: 435 } },
 };
-const TAXI2_Y = 150;  // 上面的滑行道 2
-const TAXI1_Y = 510;  // 下面的滑行道 1
-const TOP_GATE_Y = 95;
-const BOT_GATE_Y = 575;
+const TAXI2_Y = 180;  // 上面的滑行道 2
+const TAXI1_Y = 540;  // 下面的滑行道 1
+const TOP_GATE_Y = 125;
+const BOT_GATE_Y = 605;
+// 機場大廳：上面一棟、下面一棟，蓋在停機坪後面
+const TERMINALS = { top: { y1: 62, y2: 96 }, bottom: { y1: 634, y2: 668 } };
+function terminalEdge(g){ return isTop(g) ? TERMINALS.top.y2 : TERMINALS.bottom.y1; }
 const LEFT_X = 30;    // 左邊的路：去跑道頭排隊起飛
 const RIGHT_X = 570;  // 右邊的路：降落完開出來
 const EXIT_X = 545;   // 降落完在這裡先看右邊的路能不能走
@@ -258,6 +261,20 @@ function hitchTug(p, t, bend){
   t.y = hy + Math.sin(b) * (TUG_GAP - HITCH);
   t.bar = [hx, hy, hx + Math.cos(b) * 4, hy + Math.sin(b) * 4];
 }
+// ===== 空橋：飛機停好就伸出去，要走之前縮回來 =====
+const BRIDGE_TIME = 2;  // 伸出去或縮回來要 2 秒
+const bridges = {};
+for (let g = 1; g <= GATE_COUNT; g++) bridges[g] = 0;
+function moveBridges(dt){
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    const p = state.planes.find(q => q.gate === g && (q.phase === 'docking' || q.phase === 'parked'));
+    const target = p ? 1 : 0;
+    const step = dt / BRIDGE_TIME;
+    if (target > bridges[g]) bridges[g] = Math.min(1, bridges[g] + step);
+    else if (target < bridges[g]) bridges[g] = Math.max(0, bridges[g] - step);
+  }
+}
+
 function moveTugs(dt){
   for (const t of Object.values(tugs)) {
     if (!t.path || !t.path.length) continue;
@@ -347,6 +364,7 @@ function update(dt){
 
   for (const p of state.planes) step(p, dt);
   moveTugs(dt);
+  moveBridges(dt);
   state.planes = state.planes.filter(p => p.phase !== 'gone');
 }
 
@@ -394,7 +412,12 @@ function step(p, dt){
       break;
 
     case 'taxiIn':
-      if (move(p, dt)) {
+      if (move(p, dt)) setPhase(p, 'docking');
+      break;
+
+    case 'docking':
+      // 🚶 空橋伸出去接飛機，接好了才開始算停多久
+      if (bridges[p.gate] >= 1) {
         p.depTime = state.clock + rand(PARK_MIN, PARK_MAX);
         setPhase(p, 'parked');
       }
@@ -407,13 +430,20 @@ function step(p, dt){
       const gx = gateX(p.gate), ty = taxiY(p.gate);
       if (lane.spots.length >= LANE_SIZE || !pushZoneClear(p)) break;
       lane.spots.push(p.id);
-      // 🚜 螃蟹車從停機坪旁邊開到機頭前面
-      const t = tugs[p.gate];
-      t.mode = 'toPlane';
-      t.path = [noseOf(p)];
-      setPhase(p, 'hookup');
+      // 🚶 空橋先縮回來
+      setPhase(p, 'undocking');
       break;
     }
+
+    case 'undocking':
+      // 空橋縮好了，🚜 螃蟹車才從停機坪旁邊開到機頭前面
+      if (bridges[p.gate] <= 0) {
+        const t = tugs[p.gate];
+        t.mode = 'toPlane';
+        t.path = [noseOf(p)];
+        setPhase(p, 'hookup');
+      }
+      break;
 
     case 'hookup':
       // 等螃蟹車接好
@@ -630,8 +660,8 @@ function freeLoopSpot(){
 }
 
 // ===== 航班表 =====
-const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'taxiIn'];
-const DEP_PHASES = ['parked', 'hookup', 'pushback', 'detach', 'taxiOut', 'queued', 'takeoff'];
+const ARR_PHASES = ['scheduled', 'holding', 'landing', 'runwayWait', 'taxiIn', 'docking'];
+const DEP_PHASES = ['parked', 'undocking', 'hookup', 'pushback', 'detach', 'taxiOut', 'queued', 'takeoff'];
 
 function renderTable(){
   const rows = [];
@@ -662,7 +692,7 @@ function renderTable(){
           <td class="code arr">${p.code} 🛬</td>
           <td>${fmtTime(time)}</td>
           ${cell(p, 'arrRunway', p.arrRunway, p.phase === 'scheduled' || p.phase === 'holding')}
-          ${cell(p, 'gate', p.gate, p.phase !== 'taxiIn')}
+          ${cell(p, 'gate', p.gate, !['taxiIn', 'docking'].includes(p.phase))}
         </tr>`).join('')}
     </tbody>
   `;
@@ -731,8 +761,14 @@ function drawAirport(){
     gates += road(x, ty, x, y, 10) +
       `<rect x="${x - 16}" y="${y - 20}" width="32" height="40" rx="4"
              fill="#22313f" stroke="#F0B90B" stroke-width="1.5" stroke-dasharray="4 3"/>` +
-      label(x, isTop(g) ? y - 25 : y + 34, g, 13, 'middle', '#F0B90B');
+      label(x, (isTop(g) ? TERMINALS.top : TERMINALS.bottom).y1 + 29, g, 13, 'middle', '#F0B90B');
   }
+  const terminal = (t, name) =>
+    `<rect x="${LEFT_X + 40}" y="${t.y1}" width="${RIGHT_X - LEFT_X - 80}" height="${t.y2 - t.y1}" rx="3"
+           fill="#4d5d6e" stroke="#8fa3b5" stroke-width="1.2"/>
+     <rect x="${LEFT_X + 44}" y="${t.y1 + 3}" width="${RIGHT_X - LEFT_X - 88}" height="10" rx="2" fill="#9fd3ef" opacity=".25"/>` +
+    label(300, t.y1 + 11.5, name, 9, 'middle', '#e6edf3');
+  const terminals = terminal(TERMINALS.top, '🏢 機場大廳') + terminal(TERMINALS.bottom, '🏢 機場大廳');
   const runways = [1, 2].map(n => {
     const r = RUNWAYS[n];
     return road(r.end.x, r.y, RIGHT_X, r.y, 10) +
@@ -759,8 +795,9 @@ function drawAirport(){
     ${runways}
     ${label(300, TAXI2_Y + 22, '⬅️ 滑行道 2 ⬅️')}
     ${label(300, TAXI1_Y - 10, '⬅️ 滑行道 1 ⬅️')}
-    <text x="${LEFT_X}" y="330" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(-90 ${LEFT_X} 330)">左邊的路</text>
-    <text x="${RIGHT_X}" y="330" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(90 ${RIGHT_X} 330)">右邊的路</text>
+    <text x="${LEFT_X}" y="360" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(-90 ${LEFT_X} 360)">左邊的路</text>
+    <text x="${RIGHT_X}" y="360" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(90 ${RIGHT_X} 360)">右邊的路</text>
+    ${terminals}
     ${gates}
   `;
 }
@@ -783,7 +820,20 @@ function renderMap(){
               text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
       </g>`;
   }).join('');
-  document.getElementById('map').innerHTML = AIRPORT + planes + drawTugs();
+  document.getElementById('map').innerHTML = AIRPORT + drawBridges() + planes + drawTugs();
+}
+
+// 空橋：從大廳伸出去，接到飛機機頭旁邊的門
+function drawBridges(){
+  let out = '';
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    const x = gateX(g) - 9, edge = terminalEdge(g);
+    const reach = Math.abs(edge - gateY(g)) - 10;   // 伸到最長，剛好接到機頭旁邊
+    const len = 5 + (reach - 5) * bridges[g];
+    const y = isTop(g) ? edge : edge - len;
+    out += `<rect x="${x - 3}" y="${y}" width="6" height="${len}" rx="1.5" fill="#c9d3dc" stroke="#5c6b78" stroke-width="0.8"/>`;
+  }
+  return out;
 }
 
 // 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的）
