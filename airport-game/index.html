@@ -419,6 +419,7 @@ function step(p, dt){
       // 🚶 空橋伸出去接飛機，接好了才開始算停多久
       if (bridges[p.gate] >= 1) {
         p.depTime = state.clock + rand(PARK_MIN, PARK_MAX);
+        p.depCode = makeCode();  // 同一架飛機，飛出去的時候換一個新的航班代碼
         setPhase(p, 'parked');
       }
       break;
@@ -684,10 +685,10 @@ function renderTable(){
     <tbody>
       ${rows.map(({ p, dep, time }) => dep ? `
         <tr>
-          <td class="code dep">${p.code} 🛫</td>
+          <td class="code dep">${p.depCode} 🛫</td>
           <td>${fmtTime(time)}</td>
           ${cell(p, 'depRunway', p.depRunway, p.phase === 'parked')}
-          <td class="none">—</td>
+          <td>${p.gate} 號</td>
         </tr>` : `
         <tr>
           <td class="code arr">${p.code} 🛬</td>
@@ -725,7 +726,7 @@ function openPicker(id, field){
   document.getElementById('picker').innerHTML = `
     <div class="overlay" onclick="closePicker()">
       <div class="picker" onclick="event.stopPropagation()">
-        <h2>${p.code}：${title}</h2>
+        <h2>${field === 'depRunway' ? p.depCode : p.code}：${title}</h2>
         ${body}
         ${p[field] && (field !== 'gate' || p.phase === 'scheduled' || p.phase === 'holding')
           ? `<button class="cancel" onclick="choose(${p.id}, '${field}', null)">清除這格</button>` : ''}
@@ -811,14 +812,16 @@ function renderMap(){
     const dep = DEP_PHASES.includes(p.phase);
     const color = dep ? 'var(--dep)' : 'var(--arr)';
     // 螃蟹車接著飛機的時候，中間有一根桿子
-    const small = p.phase === 'parked' || p.phase === 'queued';
-    const labelY = p.phase === 'parked' && isTop(p.gate) ? p.y + 24 : (p.phase === 'queued' ? p.y + 22 : p.y - 13);
+    const atGate = ['docking', 'parked', 'undocking', 'hookup'].includes(p.phase);
+    const name = atGate ? '' : (dep ? p.depCode : p.code);
+    const small = p.phase === 'queued';
+    const labelY = p.phase === 'queued' ? p.y + 22 : p.y - 13;
     return `
       <g>
         <polygon points="${PLANE_SHAPE}" fill="${color}" stroke="#0B1929" stroke-width="1"
                  transform="translate(${p.x},${p.y}) rotate(${p.heading})"/>
         <text x="${p.x}" y="${labelY}" fill="#fff" font-size="${small ? 8 : 11}" font-weight="700"
-              text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${p.code}</text>
+              text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${name}</text>
       </g>`;
   }).join('');
   document.getElementById('map').innerHTML = AIRPORT + drawBridges() + planes + drawTugs();
