@@ -120,6 +120,7 @@
   .picker h3 { margin: 10px 0 6px; color: var(--text-dim); font-size: 14px; font-weight: 600; }
   .options { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
   .options.two { grid-template-columns: repeat(2, 1fr); }
+  .options.four { grid-template-columns: repeat(2, 1fr); }
   .opt {
     padding: 12px 0;
     font-size: 18px; font-weight: 800;
@@ -177,9 +178,12 @@ const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛
 // ===== 機場地圖的位置 =====
 // 兩條跑道橫的、平行，從左邊往右邊降落和起飛
 const RUNWAYS = {
-  1: { y: 285, start: { x: 200, y: 285 }, end: { x: 520, y: 285 } },
-  2: { y: 435, start: { x: 200, y: 435 }, end: { x: 520, y: 435 } },
+  1: { y: 240, start: { x: 200, y: 240 }, end: { x: 520, y: 240 } },
+  2: { y: 320, start: { x: 200, y: 320 }, end: { x: 520, y: 320 } },
+  3: { y: 400, start: { x: 200, y: 400 }, end: { x: 520, y: 400 } },
+  4: { y: 480, start: { x: 200, y: 480 }, end: { x: 520, y: 480 } },
 };
+const RUNWAY_IDS = Object.keys(RUNWAYS).map(Number);  // 四條跑道：1、2、3、4 號
 const TAXI2_Y = 180;  // 上面的滑行道 2
 const TAXI1_Y = 540;  // 下面的滑行道 1
 const TOP_GATE_Y = 125;
@@ -208,9 +212,9 @@ const state = {
   clock: START_TIME,
   nextArrival: START_TIME,
   planes: [],
-  runways: { 1: null, 2: null },  // 現在誰在用這條跑道
+  runways: Object.fromEntries(RUNWAY_IDS.map(n => [n, null])),  // 現在誰在用這條跑道
   gates: {},                      // 每個停機坪被誰用
-  lanes: { 1: { spots: [], queue: [] }, 2: { spots: [], queue: [] } },  // 跑道頭前面排隊：誰有位子、誰已經在排隊
+  lanes: Object.fromEntries(RUNWAY_IDS.map(n => [n, { spots: [], queue: [] }])),  // 跑道頭前面排隊：誰有位子、誰已經在排隊
   usedCodes: new Set(),
   dirty: true,
 };
@@ -288,7 +292,7 @@ function moveTugs(dt){
     }
     if (!t.path.length) {
       t.path = null;
-      if (t.mode === 'back') t.mode = 'home';
+      if (t.mode === 'back') { t.mode = 'home'; t.heading = 90; }  // 開回家以後停直的，跟其他螃蟹車一樣
       if (t.mode === 'toPlane') t.mode = 'ready';
     }
   }
@@ -720,7 +724,7 @@ function openPicker(id, field){
       <div class="options">${[1,2,3,4,5,6,7,8,9,10].map(gateOpt).join('')}</div>`;
   } else {
     title = '選跑道';
-    body = `<div class="options two">${[1, 2].map(n => option(n, n + ' 號跑道')).join('')}</div>`;
+    body = `<div class="options four">${RUNWAY_IDS.map(n => option(n, n + ' 號跑道')).join('')}</div>`;
   }
 
   document.getElementById('picker').innerHTML = `
@@ -771,7 +775,7 @@ function drawAirport(){
      <rect x="${LEFT_X + 44}" y="${t.y1 + 3}" width="${RIGHT_X - LEFT_X - 88}" height="10" rx="2" fill="#9fd3ef" opacity=".25"/>` +
     label(300, t.y1 + 11.5, name, 9, 'middle', '#e6edf3');
   const terminals = terminal(TERMINALS.top, '🏢 機場大廳') + terminal(TERMINALS.bottom, '🏢 機場大廳');
-  const runways = [1, 2].map(n => {
+  const runways = RUNWAY_IDS.map(n => {
     const r = RUNWAYS[n];
     return road(r.end.x, r.y, RIGHT_X, r.y, 10) +
       // 通往跑道頭的滑行道：要起飛的飛機在這裡排隊（最多 5 架）
@@ -785,7 +789,7 @@ function drawAirport(){
       // 跑道
       `<rect x="${r.start.x}" y="${r.y - 14}" width="${r.end.x - r.start.x}" height="28" fill="var(--asphalt)"/>
        <line x1="${r.start.x + 10}" y1="${r.y}" x2="${r.end.x - 10}" y2="${r.y}" stroke="#fff" stroke-width="2" stroke-dasharray="14 12" opacity=".7"/>` +
-      label(r.start.x + 160, r.y + 31, `${n} 號跑道　➡️ 往右降落、往右起飛`, 12, 'middle', '#fff');
+      label(r.start.x + 160, r.y + 27, `${n} 號跑道　➡️ 往右降落、往右起飛`, 11, 'middle', '#fff');
   }).join('');
   return `
     <rect x="0" y="0" width="600" height="58" fill="#123a5a"/>
