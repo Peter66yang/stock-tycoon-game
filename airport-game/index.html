@@ -36,6 +36,25 @@
   .title { font-size: clamp(20px, 3vw, 30px); font-weight: 800; letter-spacing: 2px; }
   .title span { color: var(--gold); }
   .title small { font-size: 0.5em; color: var(--text-dim); letter-spacing: 0; margin-left: 6px; }
+  .right-top { display: flex; gap: 1vw; align-items: center; }
+  .money {
+    font-size: clamp(16px, 2.4vw, 24px);
+    font-weight: 800;
+    color: #2ECC71;
+    background: var(--panel);
+    border: 2px solid #2ECC71;
+    border-radius: 10px;
+    padding: 0.5vh 1.2vw;
+    font-variant-numeric: tabular-nums;
+  }
+  .buy-info { color: var(--text); margin: 0 0 14px; line-height: 1.6; }
+  .buy-info b { color: #2ECC71; }
+  .buy-info .short { color: #E74C3C; }
+  .buy-btn {
+    padding: 10px 28px; font-size: 18px; font-weight: 800;
+    border: none; border-radius: 10px; background: #2ECC71; color: #0B1929; cursor: pointer;
+  }
+  .buy-btn:disabled { opacity: .35; cursor: not-allowed; }
   .clock {
     font-family: "Courier New", monospace;
     font-size: clamp(20px, 3vw, 30px);
@@ -145,7 +164,10 @@
 <div id="app">
   <div class="header">
     <div class="title">🗼 機場<span>管制</span><small>第三版</small></div>
-    <div class="clock" id="clock">08:00:00</div>
+    <div class="right-top">
+      <div class="money" id="money">💰 0 元</div>
+      <div class="clock" id="clock">08:00:00</div>
+    </div>
   </div>
   <div class="main">
     <div class="left">
@@ -153,6 +175,8 @@
       <div class="hint">
         👆 點黃色的「點我」來安排跑道和停機坪<br>
         🅿️ 跑道和停機坪<b>都填好</b>，飛機才會降落<br>
+        💰 降落、起飛各賺 100 元；晚超過 15 秒只拿 50 元<br>
+        🔒 點地圖上鎖起來的停機坪，花 500 元就能買<br>
         🛬 藍色 = 要降落　🛫 橘色 = 要起飛<br>
         ⬅️ 滑行道上大家都往左開，降落走右邊的路、起飛走左邊的路<br>
         🚜 填好跑道、跑道頭前面的隊伍還有空位（最多 5 架），螃蟹車才會把飛機推出來
@@ -174,6 +198,14 @@ const PARK_MAX = 15;
 const GATE_COUNT = 20;             // 20 個停機坪：1～10 在下面、11～20 在上面
 const LANE_SIZE = 5;               // 每條跑道前面最多排 5 架
 const LOOKAHEAD = 120;             // 航班表提早 2 分鐘顯示要來的飛機
+
+// ===== 錢的規則（設計師決定的）=====
+const PAY_LANDING = 100;      // 降落賺 100 元
+const PAY_TAKEOFF = 100;      // 起飛賺 100 元
+const LATE_FINE = 50;         // 延誤扣 50 元
+const LATE_AFTER = 15;        // 比航班表的時間晚超過 15 秒才算延誤
+const GATE_PRICE = 500;       // 一個新的停機坪 500 元
+const START_GATES = [1, 2, 3, 4, 5, 11, 12, 13, 14, 15];  // 一開始上面 5 個、下面 5 個
 
 // ===== 機場地圖的位置 =====
 // 兩條跑道橫的、平行，從左邊往右邊降落和起飛
@@ -216,6 +248,9 @@ const state = {
   gates: {},                      // 每個停機坪被誰用
   lanes: Object.fromEntries(RUNWAY_IDS.map(n => [n, { spots: [], queue: [] }])),  // 跑道頭前面排隊：誰有位子、誰已經在排隊
   usedCodes: new Set(),
+  money: 0,                       // 一開始 0 元
+  owned: new Set(START_GATES),    // 已經買了的停機坪
+  popups: [],                     // 地圖上飄起來的「+100 元」
   dirty: true,
 };
 for (let g = 1; g <= GATE_COUNT; g++) state.gates[g] = null;
@@ -372,6 +407,14 @@ function update(dt){
   state.planes = state.planes.filter(p => p.phase !== 'gone');
 }
 
+// 賺錢：延誤的話從 100 元裡扣 50 元，在飛機旁邊飄一個字
+function earn(p, amount, late){
+  const got = amount - (late ? LATE_FINE : 0);
+  state.money += got;
+  state.popups.push({ x: p.x, y: p.y - 18, text: late ? `+${got} 元（延誤）` : `+${got} 元`,
+                      color: late ? '#FFA94D' : '#2ECC71', t0: state.clock });
+}
+
 function setPhase(p, phase){ p.phase = phase; state.dirty = true; }
 
 function step(p, dt){
@@ -401,6 +444,11 @@ function step(p, dt){
 
     case 'landing':
       if (move(p, dt)) setPhase(p, 'runwayWait');
+      // 💰 碰到跑道就賺錢（晚超過 15 秒算延誤）
+      if (!p.paidLanding && p.dist >= p.lens[2]) {
+        p.paidLanding = true;
+        earn(p, PAY_LANDING, state.clock > p.arrTime + LATE_AFTER);
+      }
       break;
 
     case 'runwayWait':
@@ -461,6 +509,7 @@ function step(p, dt){
         if (!pushZoneClear(p)) break;  // 要推之前再看一次：滑行道上有飛機就先等
         tugs[p.gate].mode = 'attached';
         setPath(p, pushbackPath(p.gate), SPEED.push, true);
+        p.lateOut = state.clock > p.depTime + LATE_AFTER;  // 起飛延誤看的是「推出去」的時間
         setPhase(p, 'pushback');
       }
       break;
@@ -530,6 +579,7 @@ function step(p, dt){
 
     case 'takeoff':
       if (p.dist > p.lens[2]) {
+        if (!p.paidTakeoff) { p.paidTakeoff = true; earn(p, PAY_TAKEOFF, p.lateOut); }  // 💰 起飛賺錢
         p.speed = SPEED.air;
         if (state.runways[p.depRunway] === p.id) state.runways[p.depRunway] = null;
       }
@@ -712,7 +762,9 @@ function openPicker(id, field){
     `<button class="opt ${p[field] === value ? 'chosen' : ''}" ${taken ? 'disabled' : ''}
              onclick="choose(${p.id}, '${field}', ${value})">${label}</button>`;
   // 已經有別的飛機的停機坪不能選
-  const gateOpt = g => option(g, g, state.gates[g] && state.gates[g] !== p.id);
+  const gateOpt = g => state.owned.has(g)
+    ? option(g, g, state.gates[g] && state.gates[g] !== p.id)
+    : `<button class="opt" disabled title="還沒買">🔒</button>`;
 
   let title, body;
   if (field === 'gate') {
@@ -745,6 +797,7 @@ function choose(id, field, value){
   const p = state.planes.find(q => q.id === id);
   if (!p) return closePicker();
   if (field === 'gate') {
+    if (value && !state.owned.has(value)) return;
     if (value && state.gates[value] && state.gates[value] !== p.id) return;
     if (p.gate) state.gates[p.gate] = null;
     if (value) state.gates[value] = p.id;
@@ -761,14 +814,6 @@ function drawAirport(){
   const label = (x, y, text, size = 12, anchor = 'middle', color = '#cfd8e0') =>
     `<text x="${x}" y="${y}" fill="${color}" font-size="${size}" font-weight="700" text-anchor="${anchor}">${text}</text>`;
 
-  let gates = '';
-  for (let g = 1; g <= GATE_COUNT; g++) {
-    const x = gateX(g), y = gateY(g), ty = taxiY(g);
-    gates += road(x, ty, x, y, 10) +
-      `<rect x="${x - 16}" y="${y - 20}" width="32" height="40" rx="4"
-             fill="#22313f" stroke="#F0B90B" stroke-width="1.5" stroke-dasharray="4 3"/>` +
-      label(x, (isTop(g) ? TERMINALS.top : TERMINALS.bottom).y1 + 29, g, 13, 'middle', '#F0B90B');
-  }
   const terminal = (t, name) =>
     `<rect x="${LEFT_X + 40}" y="${t.y1}" width="${RIGHT_X - LEFT_X - 80}" height="${t.y2 - t.y1}" rx="3"
            fill="#4d5d6e" stroke="#8fa3b5" stroke-width="1.2"/>
@@ -804,10 +849,75 @@ function drawAirport(){
     <text x="${LEFT_X}" y="360" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(-90 ${LEFT_X} 360)">左邊的路</text>
     <text x="${RIGHT_X}" y="360" fill="#cfd8e0" font-size="11" font-weight="700" text-anchor="middle" dy="4" transform="rotate(90 ${RIGHT_X} 360)">右邊的路</text>
     ${terminals}
-    ${gates}
   `;
 }
 const AIRPORT = drawAirport();
+
+// 停機坪：買了的是黃色虛線框；還沒買的是灰色、有 🔒 和價錢
+function drawGates(){
+  let out = '';
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    const x = gateX(g), y = gateY(g), ty = taxiY(g), mine = state.owned.has(g);
+    const numY = (isTop(g) ? TERMINALS.top : TERMINALS.bottom).y1 + 29;
+    out += `<line x1="${x}" y1="${ty}" x2="${x}" y2="${y}" stroke="var(--asphalt)" stroke-width="10" opacity="${mine ? 1 : .4}"/>`;
+    if (mine) {
+      out += `<rect x="${x - 16}" y="${y - 20}" width="32" height="40" rx="4"
+                    fill="#22313f" stroke="#F0B90B" stroke-width="1.5" stroke-dasharray="4 3"/>
+              <text x="${x}" y="${numY}" fill="#F0B90B" font-size="13" font-weight="700" text-anchor="middle">${g}</text>`;
+    } else {
+      out += `<rect x="${x - 16}" y="${y - 20}" width="32" height="40" rx="4"
+                    fill="#1b2630" stroke="#5c6b78" stroke-width="1.2" style="cursor:pointer"/>
+              <text x="${x}" y="${y + 2}" font-size="13" text-anchor="middle" style="pointer-events:none">🔒</text>
+              <text x="${x}" y="${y + 15}" fill="#9aa9b7" font-size="7.5" font-weight="700" text-anchor="middle" style="pointer-events:none">${GATE_PRICE}元</text>
+              <text x="${x}" y="${numY}" fill="#7d8b97" font-size="13" font-weight="700" text-anchor="middle">${g}</text>`;
+    }
+  }
+  return out;
+}
+let GATES_SVG = drawGates();
+
+// 點地圖上 🔒 的停機坪 → 問要不要買
+document.getElementById('map').addEventListener('click', e => {
+  const svg = e.currentTarget;
+  const pt0 = svg.createSVGPoint();
+  pt0.x = e.clientX; pt0.y = e.clientY;
+  const m = pt0.matrixTransform(svg.getScreenCTM().inverse());
+  for (let g = 1; g <= GATE_COUNT; g++) {
+    if (state.owned.has(g)) continue;
+    if (Math.abs(m.x - gateX(g)) <= 17 && Math.abs(m.y - gateY(g)) <= 21) return askBuy(g);
+  }
+});
+function askBuy(g){
+  const enough = state.money >= GATE_PRICE;
+  document.getElementById('picker').innerHTML = `
+    <div class="overlay" onclick="closePicker()">
+      <div class="picker" onclick="event.stopPropagation()">
+        <h2>🔒 ${g} 號停機坪</h2>
+        <p class="buy-info">要花 <b>${GATE_PRICE} 元</b> 買下來嗎？<br>你現在有 <b>${state.money} 元</b>
+          ${enough ? '' : `<br><span class="short">錢還不夠，還差 ${GATE_PRICE - state.money} 元</span>`}</p>
+        <button class="buy-btn" ${enough ? '' : 'disabled'} onclick="buyGate(${g})">買下來</button>
+        <button class="cancel" onclick="closePicker()">取消</button>
+      </div>
+    </div>`;
+}
+function buyGate(g){
+  if (state.owned.has(g) || state.money < GATE_PRICE) return closePicker();
+  state.money -= GATE_PRICE;
+  state.owned.add(g);
+  GATES_SVG = drawGates();
+  state.dirty = true;
+  closePicker();
+}
+
+// 地圖上飄起來的「+100 元」，2 秒後消失
+function drawPopups(){
+  state.popups = state.popups.filter(q => state.clock - q.t0 < 2);
+  return state.popups.map(q => {
+    const k = (state.clock - q.t0) / 2;
+    return `<text x="${q.x}" y="${q.y - k * 20}" fill="${q.color}" font-size="12" font-weight="800" text-anchor="middle"
+                  stroke="#0B1929" stroke-width="3" paint-order="stroke" opacity="${1 - k}">${q.text}</text>`;
+  }).join('');
+}
 
 const PLANE_SHAPE = '12,0 3,-2 0,-10 -3,-10 -2,-2 -8,-2 -11,-5 -13,-5 -12,0 -13,5 -11,5 -8,2 -2,2 -3,10 0,10 3,2';
 
@@ -828,13 +938,14 @@ function renderMap(){
               text-anchor="middle" stroke="#0B1929" stroke-width="3" paint-order="stroke">${name}</text>
       </g>`;
   }).join('');
-  document.getElementById('map').innerHTML = AIRPORT + drawBridges() + planes + drawTugs();
+  document.getElementById('map').innerHTML = AIRPORT + GATES_SVG + drawBridges() + planes + drawTugs() + drawPopups();
 }
 
 // 空橋：從大廳斜斜地伸出去，接到飛機機頭旁邊的門
 function drawBridges(){
   let out = '';
   for (let g = 1; g <= GATE_COUNT; g++) {
+    if (!state.owned.has(g)) continue;  // 還沒買的停機坪沒有空橋
     // 空橋只能接在飛機的「左邊」（用飛機自己的方向來看）
     // 上面的飛機機頭朝上，左邊是畫面的左邊；下面的飛機機頭朝下，左邊是畫面的右邊
     const h = (isTop(g) ? -90 : 90) * Math.PI / 180;
@@ -852,7 +963,7 @@ function drawBridges(){
 
 // 螃蟹車：黃色、扁扁的長方形、很小、跟飛機同一個方向（直的）
 function drawTugs(){
-  return Object.values(tugs).map(t =>
+  return Object.entries(tugs).filter(([g]) => state.owned.has(Number(g))).map(([, t]) =>
     (t.mode === 'attached' && t.bar
       ? `<line x1="${t.bar[0]}" y1="${t.bar[1]}" x2="${t.bar[2]}" y2="${t.bar[3]}" stroke="#cfd8e0" stroke-width="1.5"/>
          <circle cx="${t.bar[0]}" cy="${t.bar[1]}" r="1.3" fill="#cfd8e0"/>` : '') +
@@ -867,6 +978,7 @@ function loop(now){
   last = now;
   update(dt);
   document.getElementById('clock').textContent = fmtTime(state.clock);
+  document.getElementById('money').textContent = `💰 ${state.money.toLocaleString()} 元`;
   if (state.dirty) { renderTable(); state.dirty = false; }
   renderMap();
   requestAnimationFrame(loop);
